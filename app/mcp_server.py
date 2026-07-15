@@ -20,17 +20,22 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 
 from .asgi_bridge import serve_asgi
+from .auth import resolve_identity
+from .store import KeyStore
 from .tools import ToolContext, build_registry
 
 log = logging.getLogger("claudera")
 
+MCP_SESSION_HEADER = "mcp-session-id"
+
 
 class CalderaMCP:
-    """Owns the MCP server, tool registry, and Streamable HTTP transport."""
+    """Owns the MCP server, tool registry, key store, and transport."""
 
-    def __init__(self, services: dict, config: dict | None = None):
+    def __init__(self, services: dict, config: dict | None = None, db_path: str | None = None):
         self.services = services
         self.config = config or {}
+        self.keystore = KeyStore(db_path) if db_path else None
         self.registry = build_registry(services)
         self.server: Server = Server("claudera")
         self._register_handlers()
@@ -70,20 +75,55 @@ class CalderaMCP:
             if spec is None:
                 raise ValueError(f"unknown tool: {name}")
             ctx = self._context_for_request()
+            if self.keystore is not None and ctx.username is None:
+                # Defence in depth: handle_http already gated the request, but a
+                # key could have been revoked mid-session.
+                raise ValueError("unauthorized: no valid Caldera identity for this request")
             result = await spec.handler(ctx, arguments or {})
             return [types.TextContent(type="text", text=json.dumps(result, default=str))]
 
     def _context_for_request(self) -> ToolContext:
         """Build the per-call context.
 
-        Bearer auth (step 2) will resolve the user/group/session from the current
-        request here; step 1 has no auth so the context is anonymous.
+        Resolves the bearer identity from the Starlette request the MCP transport
+        threads into ``request_context`` for the current JSON-RPC message, so the
+        user/group/session are available inside the tool handler.
         """
-        return ToolContext(services=self.services)
+        username = group = session_id = None
+        if self.keystore is not None:
+            try:
+                req = self.server.request_context.request
+            except LookupError:
+                req = None
+            if req is not None:
+                identity = resolve_identity(self.keystore, req.headers)
+                if identity is not None:
+                    username, group = identity.username, identity.group
+                session_id = req.headers.get(MCP_SESSION_HEADER)
+        return ToolContext(
+            services=self.services,
+            username=username,
+            group=group,
+            session_id=session_id,
+        )
 
     # -- aiohttp integration ---------------------------------------------------
 
     async def handle_http(self, request: web.Request) -> web.StreamResponse:
+        # Authenticate every MCP request at the transport edge. A bad or missing
+        # key is rejected before any MCP session is created.
+        if self.keystore is not None:
+            identity = resolve_identity(self.keystore, request.headers)
+            if identity is None:
+                return web.json_response(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32001, "message": "Unauthorized: invalid or missing bearer key"},
+                    },
+                    status=401,
+                    headers={"WWW-Authenticate": 'Bearer realm="caldera-mcp"'},
+                )
         return await serve_asgi(request, self.manager.handle_request)
 
     async def lifespan(self, app: web.Application):

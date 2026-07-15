@@ -13,12 +13,16 @@ Caldera 5.3.0 core plugins such as ``plugins/stockpile/hook.py``.
 """
 
 import logging
+import os
 
 from aiohttp import web
 
 from app.utility.base_world import BaseWorld
 
 from plugins.claudera.app.mcp_server import CalderaMCP
+
+PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(PLUGIN_DIR, 'data', 'claudera.db')
 
 name = 'claudera'
 description = 'Authenticated remote MCP server exposing Caldera to an external Claude client'
@@ -51,7 +55,7 @@ async def enable(services):
     path = mcp_cfg.get('path', '/mcp')
 
     app = services.get('app_svc').application
-    caldera_mcp = CalderaMCP(services, mcp_cfg)
+    caldera_mcp = CalderaMCP(services, mcp_cfg, db_path=DB_PATH)
 
     # Single MCP endpoint. Streamable HTTP uses POST for requests, GET to open a
     # server->client stream, and DELETE to end a session, so route all methods.

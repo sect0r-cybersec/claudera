@@ -12,7 +12,8 @@ This is the **inverse** of the bundled `mcp` plugin (which embeds an LLM inside 
 
 Build in progress. Implemented so far:
 
-- **Step 1 — skeleton.** MCP server mounted as a route on Caldera's own aiohttp app (no second web server, no extra dependency beyond the MCP Python SDK). Answers `initialize`, `tools/list`, and `tools/call` over Streamable HTTP. Ships two connectivity tools (`server_info`, `ping`). No auth yet.
+- **Step 1 — skeleton.** MCP server mounted as a route on Caldera's own aiohttp app (no second web server, no extra dependency beyond the MCP Python SDK). Answers `initialize`, `tools/list`, and `tools/call` over Streamable HTTP. Ships two connectivity tools (`server_info`, `ping`).
+- **Step 2 — bearer auth + per-user key store.** Every MCP request must carry `Authorization: Bearer <key>`; a bad/missing key is rejected with HTTP 401 before any session is created. Keys are per-user, stored hashed (argon2, reusing Caldera's hashing) in a plugin-scoped SQLite DB (`data/claudera.db`), and resolve to a Caldera username + group that scopes tool actions. Adds the `list_agents` read tool. Keys are issued/rotated/revoked via a CLI (GUI comes later).
 
 ## Architecture
 
@@ -66,6 +67,25 @@ claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
   }
 }
 ```
+
+## Key management (CLI)
+
+Keys are per-Caldera-user. The group is taken from Caldera's own `users` config, so a key can only map to a real user's real group. The raw token is shown **once** at issue time; only an argon2 hash is stored.
+
+Run from the Caldera root with the Caldera venv:
+
+```bash
+# Issue a key for a user (group resolved from conf/default.yml)
+python -m plugins.claudera.app.cli issue --user red
+
+# List / rotate / revoke / re-activate
+python -m plugins.claudera.app.cli list
+python -m plugins.claudera.app.cli rotate  --key-id <id>
+python -m plugins.claudera.app.cli revoke  --key-id <id>
+python -m plugins.claudera.app.cli activate --key-id <id>
+```
+
+The token format is `cald_<key_id>.<secret>`; use it as the bearer value in the client configs above. A GUI for issue/rotate/revoke lands in a later build step.
 
 ## Configuration
 
