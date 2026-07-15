@@ -1,0 +1,3 @@
+# claudera depends only on the official MCP Python SDK on top of Caldera's own
+# runtime (aiohttp, starlette are already present in the Caldera environment).
+mcp>=1.28.0

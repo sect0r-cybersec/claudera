@@ -1,0 +1,23 @@
+---
+# claudera plugin configuration
+#
+# claudera turns Caldera into an authenticated remote MCP server driven by an
+# external Claude client (Claude Code / Claude Desktop) over the LAN.
+
+mcp:
+  # Path the MCP Streamable HTTP endpoint is served on, relative to Caldera's
+  # own host:port. Clients connect to http://<caldera-host>:<caldera-port><path>.
+  path: /mcp
+
+  # json_response=true makes POST responses a single application/json body
+  # rather than an SSE stream. Simpler and sufficient for request/response tools.
+  json_response: true
+
+  # Transport security (MCP SDK DNS-rebinding / Host-header protection).
+  # LAN lab default: protection OFF so clients can reach the server via the
+  # host's LAN name/IP. To harden, set enable_dns_rebinding_protection: true and
+  # list the exact Host values and Origins you permit.
+  security:
+    enable_dns_rebinding_protection: false
+    allowed_hosts: []
+    allowed_origins: []
