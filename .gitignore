@@ -1,1 +1,33 @@
+# Local agent workspace — never commit
 .claude/
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+*__pycache__*
+*.egg-info/
+.pytest_cache/
+.tox/
+
+# Secrets / key store — must never be pushed to the remote
+*.key
+*.pem
+*.crt
+*.tokens
+conf/local.yml
+data/keystore.db
+data/keystore.db-*
+data/run_history.db
+data/run_history.db-*
+data/claudera.db
+data/claudera.db-*
+
+# Downloaded / fetched payloads — never commit fetched binaries
+payloads/downloaded/
+data/uploads/
+
+# Editor / OS
+.idea/
+.vscode/
+*.DS_Store
