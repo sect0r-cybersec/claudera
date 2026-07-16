@@ -18,6 +18,7 @@ Build in progress. Implemented so far:
 - **Step 4 — execution control + read-back.** `start_operation`, `pause_operation`, `resume_operation`, `stop_operation`, `get_operation_status` drive Caldera's own operation state machine (`run()` is scheduled lazily on first start). Read-back: `get_operation_report` (per-ability host/command/times/status/output), `query_facts`, `list_abilities`, `list_adversaries`, `list_operations`. All scoped to the caller's group.
 - **Step 5 — correlation-key emitter.** `get_correlation_keys` emits, per executed ability, `{resolved_command, utc_start, utc_stop, technique_id, telemetry_hostname}` — the join key for a separate SIEM connector. `telemetry_hostname` is the host as telemetry sees it (Computer/DeviceName), mapped from the Caldera agent, not the paw. This plugin does not query any SIEM.
 - **Step 6 — payload find / download.** `find_payload` searches local payloads first (real sha256) and reports the trusted allow-list; it downloads nothing. `download_payload` fetches an allow-listed URL (off-list URLs need `confirm=true`), verifies the sha256, stores it in the plugin payloads dir (never executed, never placed on an agent), and logs the event. Default trusted sources: Atomic Red Team and the MITRE stockpile repo.
+- **Step 7 — run history + magma GUI panel.** Every mutating tool call is logged as a run-history event grouped by MCP session; `get_run_history` exposes it. A magma Vue panel (`gui/views/claudera.vue`) shows runs/events/downloads and a key-admin view (issue/rotate/revoke), backed by authenticated `/plugin/claudera/api/*` endpoints (Caldera session auth). Appears in the Caldera nav under **claudera**.
 
 ## Architecture
 
@@ -29,7 +30,11 @@ Build in progress. Implemented so far:
 
 1. Ensure the MCP Python SDK is present in Caldera's environment (`pip install "mcp>=1.28.0"` — already present in this lab venv).
 2. Add `claudera` to the enabled plugins in your Caldera config (`plugins:` list in `conf/local.yml` / `conf/default.yml`).
-3. Restart Caldera. On this lab box it runs as a systemd service:
+3. Build the magma GUI so the **claudera** panel appears in the Caldera nav (run once, and after any change to `gui/`):
+   ```
+   cd plugins/magma && npm run build     # runs prebundle.js (copies plugin gui/) then vite build
+   ```
+4. Restart Caldera. On this lab box it runs as a systemd service:
    ```
    sudo systemctl stop caldera && sudo systemctl start caldera
    systemctl status caldera        # confirm it came back up

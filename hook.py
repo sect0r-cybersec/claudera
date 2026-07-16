@@ -20,6 +20,7 @@ from aiohttp import web
 from app.utility.base_world import BaseWorld
 
 from plugins.claudera.app.mcp_server import CalderaMCP
+from plugins.claudera.app.gui_api import ClauderaGuiApi
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(PLUGIN_DIR, 'data', 'claudera.db')
@@ -61,6 +62,10 @@ async def enable(services):
     # server->client stream, and DELETE to end a session, so route all methods.
     app.router.add_route('*', path, caldera_mcp.handle_http)
     app.router.add_route('GET', '/plugin/claudera/gui', _splash)
+
+    # Authenticated REST endpoints backing the magma GUI panel.
+    gui_api = ClauderaGuiApi(services, caldera_mcp.keystore, plugin_cfg)
+    gui_api.register_routes(app.router)
 
     # Drive the MCP session-manager task group for the app's lifetime. enable()
     # runs during load_plugins, before AppRunner.setup(), so appending here is
