@@ -1,0 +1,46 @@
+---
+# claudera plugin configuration
+#
+# claudera turns Caldera into an authenticated remote MCP server driven by an
+# external Claude client (Claude Code / Claude Desktop) over the LAN.
+
+mcp:
+  # Path the MCP Streamable HTTP endpoint is served on, relative to Caldera's
+  # own host:port. Clients connect to http://<caldera-host>:<caldera-port><path>.
+  path: /mcp
+
+  # json_response=true makes POST responses a single application/json body
+  # rather than an SSE stream. Simpler and sufficient for request/response tools.
+  json_response: true
+
+  # Transport security (MCP SDK DNS-rebinding / Host-header protection).
+  # LAN lab default: protection OFF so clients can reach the server via the
+  # host's LAN name/IP. To harden, set enable_dns_rebinding_protection: true and
+  # list the exact Host values and Origins you permit.
+  security:
+    enable_dns_rebinding_protection: false
+    allowed_hosts: []
+    allowed_origins: []
+
+gui:
+  # Caldera users who may manage ANY user's keys from the GUI. Others can only
+  # manage their own. Empty by default.
+  admin_users: []
+
+payloads:
+  # Downloaded payloads land here (relative to the plugin dir). Caldera resolves
+  # payloads recursively under plugins/<name>/payloads, so abilities can
+  # reference downloaded files by name. This dir is gitignored.
+  download_dir: payloads/downloaded
+  # Reject downloads larger than this (bytes). Default 50 MiB.
+  max_download_bytes: 52428800
+  # Trusted remote sources. A download URL is allowed without confirmation only
+  # if its host matches and its path starts with path_prefix. Anything else is
+  # surfaced as requires_confirmation and only fetched after explicit approval.
+  allow_list:
+    - name: atomic-red-team
+      host: raw.githubusercontent.com
+      path_prefix: /redcanaryco/atomic-red-team/
+    - name: caldera-stockpile
+      host: raw.githubusercontent.com
+      path_prefix: /mitre/stockpile/
