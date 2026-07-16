@@ -65,9 +65,10 @@ class Registry:
 def build_registry(services: dict) -> Registry:
     """Assemble the tool registry. Later steps extend this function."""
     registry = Registry()
-    from . import agents, connectivity, creation
+    from . import agents, connectivity, creation, operations
 
     connectivity.register(registry)
     agents.register(registry)
     creation.register(registry)
+    operations.register(registry)
     return registry
