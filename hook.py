@@ -51,11 +51,11 @@ async def enable(services):
         'claudera',
         BaseWorld.strip_yml('plugins/claudera/conf/default.yml')[0],
     )
-    mcp_cfg = BaseWorld.get_config(prop='mcp', name='claudera') or {}
-    path = mcp_cfg.get('path', '/mcp')
+    plugin_cfg = BaseWorld.get_config(name='claudera') or {}
+    path = (plugin_cfg.get('mcp') or {}).get('path', '/mcp')
 
     app = services.get('app_svc').application
-    caldera_mcp = CalderaMCP(services, mcp_cfg, db_path=DB_PATH)
+    caldera_mcp = CalderaMCP(services, plugin_cfg, db_path=DB_PATH, plugin_dir=PLUGIN_DIR)
 
     # Single MCP endpoint. Streamable HTTP uses POST for requests, GET to open a
     # server->client stream, and DELETE to end a session, so route all methods.

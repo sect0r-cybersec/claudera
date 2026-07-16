@@ -32,15 +32,19 @@ MCP_SESSION_HEADER = "mcp-session-id"
 class CalderaMCP:
     """Owns the MCP server, tool registry, key store, and transport."""
 
-    def __init__(self, services: dict, config: dict | None = None, db_path: str | None = None):
+    def __init__(self, services: dict, config: dict | None = None, db_path: str | None = None,
+                 plugin_dir: str | None = None):
         self.services = services
+        # `config` is the full 'claudera' plugin config namespace.
         self.config = config or {}
+        self.plugin_dir = plugin_dir
         self.keystore = KeyStore(db_path) if db_path else None
         self.registry = build_registry(services)
         self.server: Server = Server("claudera")
         self._register_handlers()
 
-        sec_cfg = (self.config.get("security") or {})
+        mcp_cfg = self.config.get("mcp") or {}
+        sec_cfg = (mcp_cfg.get("security") or {})
         security = TransportSecuritySettings(
             enable_dns_rebinding_protection=bool(
                 sec_cfg.get("enable_dns_rebinding_protection", False)
@@ -50,7 +54,7 @@ class CalderaMCP:
         )
         self.manager = StreamableHTTPSessionManager(
             app=self.server,
-            json_response=bool(self.config.get("json_response", True)),
+            json_response=bool(mcp_cfg.get("json_response", True)),
             stateless=False,
             security_settings=security,
         )
@@ -105,6 +109,9 @@ class CalderaMCP:
             username=username,
             group=group,
             session_id=session_id,
+            config=self.config,
+            plugin_dir=self.plugin_dir,
+            store=self.keystore,
         )
 
     # -- aiohttp integration ---------------------------------------------------

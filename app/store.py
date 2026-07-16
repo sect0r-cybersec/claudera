@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS mcp_keys (
     last_used_at TEXT,
     active       INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS payload_downloads (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         TEXT NOT NULL,
+    username   TEXT,
+    source     TEXT,
+    url        TEXT NOT NULL,
+    sha256     TEXT,
+    size       INTEGER,
+    dest_path  TEXT,
+    status     TEXT NOT NULL
+);
 """
 
 
@@ -176,6 +187,24 @@ class KeyStore:
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [_record(r) for r in rows]
+
+
+    # -- payload download log --------------------------------------------------
+
+    def log_download(self, *, username, source, url, sha256, size, dest_path, status) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO payload_downloads (ts, username, source, url, sha256, size, dest_path, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (_utc_now(), username, source, url, sha256, size, dest_path, status),
+            )
+
+    def list_downloads(self, limit: int = 100) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM payload_downloads ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def _record(row: sqlite3.Row, last_used_at: str | None = None) -> KeyRecord:

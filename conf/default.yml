@@ -21,3 +21,21 @@ mcp:
     enable_dns_rebinding_protection: false
     allowed_hosts: []
     allowed_origins: []
+
+payloads:
+  # Downloaded payloads land here (relative to the plugin dir). Caldera resolves
+  # payloads recursively under plugins/<name>/payloads, so abilities can
+  # reference downloaded files by name. This dir is gitignored.
+  download_dir: payloads/downloaded
+  # Reject downloads larger than this (bytes). Default 50 MiB.
+  max_download_bytes: 52428800
+  # Trusted remote sources. A download URL is allowed without confirmation only
+  # if its host matches and its path starts with path_prefix. Anything else is
+  # surfaced as requires_confirmation and only fetched after explicit approval.
+  allow_list:
+    - name: atomic-red-team
+      host: raw.githubusercontent.com
+      path_prefix: /redcanaryco/atomic-red-team/
+    - name: caldera-stockpile
+      host: raw.githubusercontent.com
+      path_prefix: /mitre/stockpile/

@@ -31,6 +31,12 @@ class ToolContext:
     username: str | None = None
     group: str | None = None
     session_id: str | None = None
+    # Full plugin config (the 'claudera' namespace) and the plugin directory,
+    # for tools that need config (payload allow-list) or on-disk paths.
+    config: dict = field(default_factory=dict)
+    plugin_dir: str | None = None
+    # Set by the server so mutating tools can record run-history events.
+    store: object | None = None
 
 
 ToolHandler = Callable[[ToolContext, dict], Awaitable[dict]]
@@ -65,11 +71,12 @@ class Registry:
 def build_registry(services: dict) -> Registry:
     """Assemble the tool registry. Later steps extend this function."""
     registry = Registry()
-    from . import agents, connectivity, correlation, creation, operations
+    from . import agents, connectivity, correlation, creation, operations, payloads
 
     connectivity.register(registry)
     agents.register(registry)
     creation.register(registry)
     operations.register(registry)
     correlation.register(registry)
+    payloads.register(registry)
     return registry
