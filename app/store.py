@@ -55,7 +55,25 @@ CREATE TABLE IF NOT EXISTS payload_downloads (
     dest_path  TEXT,
     status     TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS run_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            TEXT NOT NULL,
+    session_id    TEXT,
+    username      TEXT,
+    tool          TEXT NOT NULL,
+    artefact_type TEXT,
+    artefact_id   TEXT,
+    artefact_name TEXT,
+    status        TEXT
+);
 """
+
+# Result keys that identify a created/affected artefact, in priority order.
+_ARTEFACT_KEYS = (
+    ("ability_id", "ability"),
+    ("adversary_id", "adversary"),
+    ("operation_id", "operation"),
+)
 
 
 def _utc_now() -> str:
@@ -203,6 +221,52 @@ class KeyStore:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM payload_downloads ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # -- run history -----------------------------------------------------------
+
+    def log_event(self, *, session_id, username, tool, result: dict | None) -> None:
+        """Record a mutating tool call as a run-history event.
+
+        Artefact type/id/name are derived from the tool's structured result.
+        """
+        result = result or {}
+        atype = aid = aname = None
+        for key, kind in _ARTEFACT_KEYS:
+            if result.get(key):
+                atype, aid, aname = kind, result[key], result.get("name")
+                break
+        if atype is None and result.get("filename"):  # payload download
+            atype, aid, aname = "payload", result.get("filename"), result.get("filename")
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO run_events (ts, session_id, username, tool, artefact_type, "
+                "artefact_id, artefact_name, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (_utc_now(), session_id, username, tool, atype, aid, aname, result.get("status")),
+            )
+
+    def list_events(self, session_id: str | None = None, limit: int = 500) -> list[dict]:
+        query = "SELECT * FROM run_events"
+        params: tuple = ()
+        if session_id is not None:
+            query += " WHERE session_id=?"
+            params = (session_id,)
+        query += " ORDER BY id DESC LIMIT ?"
+        params = params + (limit,)
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_runs(self, limit: int = 100) -> list[dict]:
+        """Summarise runs (grouped by session), newest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT session_id, MIN(ts) AS started, MAX(ts) AS last, "
+                "COUNT(*) AS event_count, "
+                "GROUP_CONCAT(DISTINCT username) AS users "
+                "FROM run_events GROUP BY session_id ORDER BY started DESC LIMIT ?",
+                (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
 

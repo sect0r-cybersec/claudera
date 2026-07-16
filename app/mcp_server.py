@@ -84,6 +84,11 @@ class CalderaMCP:
                 # key could have been revoked mid-session.
                 raise ValueError("unauthorized: no valid Caldera identity for this request")
             result = await spec.handler(ctx, arguments or {})
+            if spec.mutating and self.keystore is not None:
+                self.keystore.log_event(
+                    session_id=ctx.session_id, username=ctx.username,
+                    tool=name, result=result if isinstance(result, dict) else None,
+                )
             return [types.TextContent(type="text", text=json.dumps(result, default=str))]
 
     def _context_for_request(self) -> ToolContext:
