@@ -11,8 +11,8 @@
 -->
 <template>
   <div class="content" style="padding: 1.5rem;">
-    <h1 class="title">claudera</h1>
-    <p class="subtitle is-6">Authenticated remote MCP server &mdash; run history &amp; key administration</p>
+    <h1 class="title">Claudera</h1>
+    <p class="subtitle is-6">Authenticated remote MCP server. Run history and key administration.</p>
 
     <div class="tabs">
       <ul>
@@ -20,15 +20,20 @@
         <li :class="{ 'is-active': tab === 'keys' }"><a @click="tab = 'keys'">Keys</a></li>
       </ul>
     </div>
+    <p class="is-size-7 has-text-grey mb-4">
+      <span v-if="tab === 'history'">A record of what Claude did through the MCP server: which tools ran, who ran them, and what they created or fetched.</span>
+      <span v-else>Manage the per user bearer keys that let a Claude client authenticate to this MCP server.</span>
+    </p>
 
     <p v-if="errorMessage" class="notification is-danger is-light">{{ errorMessage }}</p>
 
     <!-- RUN HISTORY -->
     <div v-if="tab === 'history'">
-      <div class="is-flex is-justify-content-space-between is-align-items-center mb-3">
+      <div class="is-flex is-justify-content-space-between is-align-items-center mb-1">
         <h2 class="subtitle is-5 mb-0">Runs</h2>
         <button class="button is-small" @click="refreshHistory" :class="{ 'is-loading': isLoading }">Refresh</button>
       </div>
+      <p class="is-size-7 has-text-grey mb-3">A run is the set of tool calls from one MCP client session, grouped by session id. Click a run to filter the events below to that session.</p>
       <table class="table is-fullwidth is-striped is-narrow is-hoverable">
         <thead>
           <tr><th>Session</th><th>Started (UTC)</th><th>Last (UTC)</th><th>Users</th><th>Events</th></tr>
@@ -51,6 +56,7 @@
         Events <span v-if="selectedSession" class="tag is-info is-light">session {{ shortId(selectedSession) }}
           <button class="delete is-small ml-2" @click="selectSession(null)"></button></span>
       </h2>
+      <p class="is-size-7 has-text-grey mb-3">Every tool call that changed state (create, start, pause, resume, stop, download), with the tool used, the artefact affected, and the user who made it.</p>
       <table class="table is-fullwidth is-striped is-narrow">
         <thead>
           <tr><th>Time (UTC)</th><th>User</th><th>Tool</th><th>Artefact</th><th>Name / id</th><th>Status</th></tr>
@@ -67,6 +73,7 @@
       </table>
 
       <h2 class="subtitle is-5">Payload downloads</h2>
+      <p class="is-size-7 has-text-grey mb-3">Files fetched with download_payload, with the verified SHA-256 and whether the hash matched (ok) or was rejected (hash_mismatch). Downloads are never executed.</p>
       <table class="table is-fullwidth is-striped is-narrow">
         <thead>
           <tr><th>Time (UTC)</th><th>User</th><th>Source</th><th>Status</th><th>SHA-256</th><th>URL</th></tr>
@@ -87,6 +94,7 @@
     <div v-if="tab === 'keys'">
       <div class="box">
         <h2 class="subtitle is-5">Issue a key</h2>
+        <p class="is-size-7 has-text-grey mb-3">Create a new bearer key for a Caldera user (leave blank to issue one for yourself). The token is shown once here, then only its hash is stored. Paste it as the Authorization Bearer value in your Claude client.</p>
         <div class="field has-addons">
           <div class="control">
             <input class="input" type="text" v-model="issueUsername"
@@ -98,15 +106,16 @@
         </div>
         <div v-if="newToken" class="notification is-warning is-light">
           <button class="delete" @click="newToken = ''"></button>
-          <strong>Copy this token now &mdash; it is shown only once:</strong>
+          <strong>Copy this token now. It is shown only once:</strong>
           <pre style="white-space: pre-wrap; word-break: break-all;">{{ newToken }}</pre>
         </div>
       </div>
 
-      <div class="is-flex is-justify-content-space-between is-align-items-center mb-3">
+      <div class="is-flex is-justify-content-space-between is-align-items-center mb-1">
         <h2 class="subtitle is-5 mb-0">Keys</h2>
         <button class="button is-small" @click="fetchKeys" :class="{ 'is-loading': isLoading }">Refresh</button>
       </div>
+      <p class="is-size-7 has-text-grey mb-3">The bearer keys for this MCP server. Rotate replaces a key's secret (the key id stays the same), Revoke disables a key, and Activate turns a revoked key back on.</p>
       <table class="table is-fullwidth is-striped is-narrow is-hoverable">
         <thead>
           <tr><th>Key id</th><th>User</th><th>Group</th><th>Active</th><th>Created (UTC)</th><th>Last used</th><th>Actions</th></tr>
