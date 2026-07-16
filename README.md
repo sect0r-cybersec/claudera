@@ -10,7 +10,7 @@ This is the **inverse** of the bundled `mcp` plugin (which embeds an LLM inside 
 
 ## Status
 
-Build in progress. Implemented so far:
+Complete. All build steps implemented and verified against a live Caldera 5.3.0 lab.
 
 - **Step 1 — skeleton.** MCP server mounted as a route on Caldera's own aiohttp app (no second web server, no extra dependency beyond the MCP Python SDK). Answers `initialize`, `tools/list`, and `tools/call` over Streamable HTTP. Ships two connectivity tools (`server_info`, `ping`).
 - **Step 2 — bearer auth + per-user key store.** Every MCP request must carry `Authorization: Bearer <key>`; a bad/missing key is rejected with HTTP 401 before any session is created. Keys are per-user, stored hashed (argon2, reusing Caldera's hashing) in a plugin-scoped SQLite DB (`data/claudera.db`), and resolve to a Caldera username + group that scopes tool actions. Adds the `list_agents` read tool. Keys are issued/rotated/revoked via a CLI (GUI comes later).
@@ -19,6 +19,22 @@ Build in progress. Implemented so far:
 - **Step 5 — correlation-key emitter.** `get_correlation_keys` emits, per executed ability, `{resolved_command, utc_start, utc_stop, technique_id, telemetry_hostname}` — the join key for a separate SIEM connector. `telemetry_hostname` is the host as telemetry sees it (Computer/DeviceName), mapped from the Caldera agent, not the paw. This plugin does not query any SIEM.
 - **Step 6 — payload find / download.** `find_payload` searches local payloads first (real sha256) and reports the trusted allow-list; it downloads nothing. `download_payload` fetches an allow-listed URL (off-list URLs need `confirm=true`), verifies the sha256, stores it in the plugin payloads dir (never executed, never placed on an agent), and logs the event. Default trusted sources: Atomic Red Team and the MITRE stockpile repo.
 - **Step 7 — run history + magma GUI panel.** Every mutating tool call is logged as a run-history event grouped by MCP session; `get_run_history` exposes it. A magma Vue panel (`gui/views/claudera.vue`) shows runs/events/downloads and a key-admin view (issue/rotate/revoke), backed by authenticated `/plugin/claudera/api/*` endpoints (Caldera session auth). Appears in the Caldera nav under **claudera**.
+- **Step 8 — key-admin GUI, docs, tests.** Key admin is in the GUI panel above; this README documents enablement, both client configs, key issuance, the allow-list, and the naming scheme; a stdlib `unittest` suite covers auth (valid/invalid/revoked/rotate), the naming helper, the store/logs, and payload hashing (including a deliberate mismatch), plus an optional live integration test.
+
+## Tools
+
+| Group | Tools |
+|-------|-------|
+| Connectivity | `server_info`, `ping` |
+| Read agents | `list_agents` |
+| Creation | `create_ability`, `create_adversary`, `create_operation` |
+| Execution control | `start_operation`, `pause_operation`, `resume_operation`, `stop_operation`, `get_operation_status` |
+| Read-back | `get_operation_report`, `query_facts`, `list_abilities`, `list_adversaries`, `list_operations` |
+| Correlation | `get_correlation_keys` |
+| Payloads | `find_payload`, `download_payload` |
+| Run history | `get_run_history` |
+
+Every tool returns structured JSON (ids, names, status), never free prose. Mutating tools are attributed to the authenticated user and recorded in run history.
 
 ## Architecture
 
@@ -94,7 +110,7 @@ python -m plugins.claudera.app.cli revoke  --key-id <id>
 python -m plugins.claudera.app.cli activate --key-id <id>
 ```
 
-The token format is `cald_<key_id>.<secret>`; use it as the bearer value in the client configs above. A GUI for issue/rotate/revoke lands in a later build step.
+The token format is `cald_<key_id>.<secret>`; use it as the bearer value in the client configs above. Keys can also be issued/rotated/revoked from the **claudera** GUI panel (a user manages their own keys; `gui.admin_users` may manage anyone's).
 
 ## Configuration
 
@@ -105,6 +121,29 @@ The token format is `cald_<key_id>.<secret>`; use it as the bearer value in the 
 - `mcp.security` — MCP DNS-rebinding / Host-header protection. Off by default for LAN use; set `enable_dns_rebinding_protection: true` and populate `allowed_hosts` / `allowed_origins` to harden.
 - `payloads.allow_list` — trusted remote sources (host + `path_prefix`). A `download_payload` URL fetches directly only if it matches; anything else is off-list and needs `confirm=true`. Defaults: Atomic Red Team, MITRE stockpile.
 - `payloads.download_dir` — where fetched payloads land (default `payloads/downloaded`, gitignored). `payloads.max_download_bytes` caps download size (default 50 MiB).
+- `gui.admin_users` — Caldera users who may manage any user's keys from the GUI (default: none; users manage their own).
+
+## Tests
+
+A stdlib `unittest` suite (no extra dependencies). Run from the Caldera root with the Caldera venv:
+
+```bash
+python -m unittest discover -s plugins/claudera/tests -t .
+```
+
+Covers the naming helper, the key store + auth resolution (valid / invalid / revoked / rotated), the run-history and download logs, and payload allow-list classification + hash verification (including a deliberate mismatch). An optional live integration test runs against a running endpoint when `CLAUDERA_MCP_URL` and `CLAUDERA_MCP_KEY` are set:
+
+```bash
+CLAUDERA_MCP_URL=http://<host>:8888/mcp CLAUDERA_MCP_KEY=cald_... \
+  python -m unittest plugins.claudera.tests.test_live_integration
+```
+
+## Security notes
+
+- **Lab-only.** No public exposure. TLS is optional on the LAN; put it behind Caldera's own TLS (the `ssl` plugin) if enabled.
+- Keys are hashed at rest (argon2, per-key salt); the raw token is shown once at issue.
+- Tool arguments and any fetched payload content are treated as untrusted **data**, never as instructions — they never drive control flow.
+- The payload allow-list (with confirm-on-off-list) is the hard boundary on fetching; downloads are never executed and never placed on an agent.
 
 ## Licence
 
