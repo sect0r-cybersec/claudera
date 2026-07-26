@@ -3,7 +3,7 @@
 ![Licence](https://img.shields.io/github/license/sect0r-cybersec/claudera)
 ![Language](https://img.shields.io/github/languages/top/sect0r-cybersec/claudera)
 ![Status](https://img.shields.io/badge/status-beta%20(lab--only)-orange)
-![Last Commit](https://img.shields.io/github/last-commit/sect0r-cybersec/claudera)
+![Last commit](https://img.shields.io/github/last-commit/sect0r-cybersec/claudera)
 
 # claudera
 
