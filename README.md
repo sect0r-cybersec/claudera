@@ -82,8 +82,6 @@ python -m plugins.claudera.app.cli activate --key-id <id>
 
 The token format is `cald_<key_id>.<secret>` and is shown only once at issue time. Keys can also be issued, rotated and revoked from the **claudera** GUI panel.
 
-In the URLs below, `<caldera-host>` and `<port>` are the machine running Caldera and the port it listens on, so the endpoint reads like `http://192.168.1.20:8888/mcp`.
-
 ### Claude Code
 
 ```bash
@@ -125,32 +123,7 @@ Claude Desktop accepts stdio servers only, so bridge the endpoint with `mcp-remo
 }
 ```
 
-Copy the `--header` argument exactly:
-
-- No space after the colon, and the whole header value in one variable. A space in the argument breaks the launch on Windows. `mcp-remote` expands `${CALDERA_MCP_AUTH}` after parsing, so Caldera still receives a well-formed header.
-- `CALDERA_MCP_AUTH` holds the complete header value, `Bearer ` prefix included. Expansion is single-pass, so the variable cannot itself reference another variable.
-- `--allow-http` is required, because `mcp-remote` refuses non-localhost plain-HTTP URLs without it.
-
-### Supplying the key
-
-`${CALDERA_MCP_KEY}` and `${CALDERA_MCP_AUTH}` are environment variable references, not literals. The client expands them when it reads the config, which keeps the raw token out of a file you may well commit. Claude Code reads `CALDERA_MCP_KEY` (the token alone); the Claude Desktop bridge reads `CALDERA_MCP_AUTH` (the token with the `Bearer ` prefix).
-
-```powershell
-[Environment]::SetEnvironmentVariable('CALDERA_MCP_KEY',  (Read-Host 'Key'),          'User')
-[Environment]::SetEnvironmentVariable('CALDERA_MCP_AUTH', "Bearer $(Read-Host 'Key')", 'User')
-```
-```bash
-export CALDERA_MCP_KEY=cald_...    # add to ~/.bashrc or ~/.zshrc to persist
-```
-
-Clients take their environment at launch, so quit the client completely and reopen; reloading the window is not enough. If your client does not expand `${...}`, substitute the raw key in the config instead.
-
-Prefer the calls above to `setx`, which records the token in your shell history and silently truncates values over 1024 characters. Either way the value is stored in plain text under `HKCU\Environment`, so this protects the key from reaching a repository, not from local disclosure.
-
-### Troubleshooting
-
-- **The server never appears in Claude Desktop, with `Skipped invalid MCP server config entries` in `%APPDATA%\Claude\logs\main.log`.** The entry is an HTTP block. Use the `mcp-remote` bridge above.
-- **`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`.** The key never reached Caldera, so `mcp-remote` fell back to OAuth discovery and parsed a login page. Check `CALDERA_MCP_AUTH` is set, includes `Bearer `, and that the client has been restarted.
+Set `CALDERA_MCP_KEY` to the token for Claude Code, and `CALDERA_MCP_AUTH` to `Bearer <token>` for the Claude Desktop bridge. Restart the client afterwards so it picks up the variable.
 
 ## Configuration
 
@@ -175,13 +148,6 @@ Set in `conf/default.yml`:
 Questions and bug reports go to [GitHub Issues](https://github.com/sect0r-cybersec/claudera/issues).
 
 ## Contributors and developers
-
-### Architecture
-
-- The MCP server uses the official Python MCP SDK (`mcp`), with the low-level `Server` plus `StreamableHTTPSessionManager`: a single endpoint, `POST` for requests, session tracked via the `Mcp-Session-Id` header. The SSE-deprecated transport is not used.
-- The session manager is an ASGI app. A small adapter (`app/asgi_bridge.py`) drives it from an aiohttp request handler, so the endpoint shares Caldera's process, event loop and listening port. The route is registered in `hook.py`.
-- Creation and execution reuse Caldera's own v2 API managers and rest service, so artefacts persist to disk like UI-made ones. Operations are created paused; `run()` is scheduled lazily on first start.
-- `get_correlation_keys` emits, per executed ability, `{resolved_command, utc_start, utc_stop, technique_id, telemetry_hostname}`, the join key for a separate SIEM connector. This plugin does not query any SIEM.
 
 ### Layout
 
