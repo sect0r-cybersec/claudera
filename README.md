@@ -101,18 +101,36 @@ claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
 }
 ```
 
-**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`) uses native streamable HTTP, the same shape as Claude Code:
+**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`) cannot take an HTTP endpoint directly. Entries under `mcpServers` are validated against a stdio-only schema — `command` is required, and `type`, `url` and `headers` are not part of it — so an HTTP block is discarded at startup and the server simply never appears. The only trace is a line in `%APPDATA%\Claude\logs\main.log`:
+
+```
+[warn] Skipped invalid MCP server config entries: { invalidServers: [ 'caldera' ] }
+```
+
+Bridge it with `mcp-remote` instead, which speaks stdio to Claude Desktop and streamable HTTP to Caldera:
 ```json
 {
   "mcpServers": {
     "caldera": {
-      "type": "http",
-      "url": "http://<caldera-host>:<port>/mcp",
-      "headers": { "Authorization": "Bearer ${CALDERA_MCP_KEY}" }
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "http://<caldera-host>:<port>/mcp",
+        "--header", "Authorization:${CALDERA_MCP_AUTH}",
+        "--allow-http"
+      ]
     }
   }
 }
 ```
+
+Three details matter, and each one is a silent failure if you get it wrong:
+
+- **No space in the `--header` argument.** Windows launches stdio servers as `cmd.exe /c <resolved-exe> <args>`. `npx` resolves to `C:\Program Files\nodejs\npx.cmd`, quoted because of the space; a header value written as `"Authorization: Bearer ..."` is quoted for the same reason. `cmd /c` only preserves quotes when the remainder holds exactly two quote characters, so with four it strips the outer pair, the exe path loses its opening quote, and the launch dies with `'C:\Program' is not recognized as an internal or external command`. Keeping the whole header value in one variable leaves the argument space-free. `mcp-remote` substitutes `${CALDERA_MCP_AUTH}` itself, after argument parsing, so the header still reaches Caldera with its space intact.
+- **`--allow-http` is required.** `mcp-remote` refuses plain-HTTP URLs that are not localhost without it.
+- **Include the `Bearer ` prefix in the variable.** Substitution is single-pass, so a variable whose value contains another `${...}` reference is not expanded a second time.
+
+If the resolved header is wrong, the visible error will not mention authentication. `mcp-remote` falls back to OAuth discovery, Caldera's catch-all route answers `/.well-known/oauth-authorization-server` with the login page as `200 text/html`, and the bridge exits on `Unexpected token '<', "<!DOCTYPE "... is not valid JSON`. Read that as *the key never reached the server*, and check the variable first.
 
 ### Supplying the key
 
@@ -129,7 +147,15 @@ export CALDERA_MCP_KEY=cald_...    # add to ~/.bashrc or ~/.zshrc to persist
 
 Restart the client afterwards so it inherits the new environment. If your client does not expand `${...}`, replace the whole `${CALDERA_MCP_KEY}` token with the raw key instead.
 
-On Windows, `setx CALDERA_MCP_KEY <key>` sets the same variable but puts the token on a command line that PowerShell records in its history file, and it silently truncates values over 1024 characters. The `SetEnvironmentVariable` call above avoids both; `sysdm.cpl` → Advanced → Environment Variables does the same through the GUI. Note that either way the value is stored in plain text under `HKCU\Environment`, readable by anything running as you — the protection this buys is against the key reaching a repository, not against local disclosure.
+The Claude Desktop bridge above reads `CALDERA_MCP_AUTH` rather than `CALDERA_MCP_KEY`, and its value is the complete header — `Bearer ` included:
+
+```powershell
+[Environment]::SetEnvironmentVariable('CALDERA_MCP_AUTH', "Bearer $(Read-Host 'Key')", 'User')
+```
+
+Nothing else is needed: `mcp-remote` reads the variable out of the environment it inherits from Claude Desktop, so the config above carries no `env` block and the token never lands in a file. Claude Desktop takes its environment at launch, so quit it completely and reopen — reloading the window is not enough.
+
+On Windows, `setx CALDERA_MCP_KEY <key>` (or `setx CALDERA_MCP_AUTH "Bearer <key>"`) sets the same variable but puts the token on a command line that PowerShell records in its history file, and it silently truncates values over 1024 characters. The `SetEnvironmentVariable` calls above avoid both; `sysdm.cpl` → Advanced → Environment Variables does the same through the GUI. Note that either way the value is stored in plain text under `HKCU\Environment`, readable by anything running as you — the protection this buys is against the key reaching a repository, not against local disclosure.
 
 ## Configuration
 
