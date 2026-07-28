@@ -82,13 +82,38 @@ python -m plugins.claudera.app.cli activate --key-id <id>
 
 The token format is `cald_<key_id>.<secret>` and is shown only once at issue time. Keys can also be issued, rotated and revoked from the **claudera** GUI panel.
 
-**Claude Code:**
+### Placeholders in the examples below
+
+Two different kinds of placeholder appear in the snippets that follow. They are replaced differently:
+
+| In the examples | What it is | What to do |
+|-----------------|------------|------------|
+| `<caldera-host>`, `<port>`, `<id>` | angle-bracket placeholder | Replace it, brackets and all: `http://192.168.1.50:8888/mcp` |
+| `$CALDERA_MCP_KEY`, `${CALDERA_MCP_KEY}` | an environment variable **named** `CALDERA_MCP_KEY` | Either leave it exactly as-is and set that variable to your token, or replace the whole reference — `$`, braces and all — with the literal token |
+
+`CALDERA_MCP_KEY` is the variable's name, not a slot to type your key into. **Do not put the token inside the braces** — `"Bearer ${cald_ab12.9f8e...}"` asks for a variable called `cald_ab12.9f8e...`, which does not exist, so the header goes out empty and Caldera answers `401`.
+
+Set the variable once per shell before launching the client:
+
+```bash
+export CALDERA_MCP_KEY='cald_ab12.9f8e7d6c5b4a'
+```
+
+```powershell
+$env:CALDERA_MCP_KEY = 'cald_ab12.9f8e7d6c5b4a'
+```
+
+### Claude Code
+
+The CLI form reads the variable from the shell that runs the command:
+
 ```bash
 claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
   --header "Authorization: Bearer $CALDERA_MCP_KEY"
 ```
 
-`.mcp.json` or `~/.claude.json`. The `"type": "http"` field is required (a `url` with no `type` is read as stdio and fails):
+Or configure it in `.mcp.json` (project) or `~/.claude.json` (user). The `"type": "http"` field is required — a `url` with no `type` is read as stdio and fails:
+
 ```json
 {
   "mcpServers": {
@@ -101,14 +126,33 @@ claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
 }
 ```
 
-**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`) uses native streamable HTTP, the same shape as Claude Code:
+Claude Code expands `${VAR}` (and `${VAR:-default}`) in `.mcp.json`, in the `command`, `args`, `env`, `url` and `headers` fields, so the file above stays safe to commit — the token lives only in your environment. Keep the `${CALDERA_MCP_KEY}` text verbatim and export the variable.
+
+If you would rather not depend on the environment, paste the token in place of the entire reference. This puts a live credential in the file, so keep it out of version control:
+
 ```json
 {
   "mcpServers": {
     "caldera": {
       "type": "http",
-      "url": "http://<caldera-host>:<port>/mcp",
-      "headers": { "Authorization": "Bearer ${CALDERA_MCP_KEY}" }
+      "url": "http://192.168.1.50:8888/mcp",
+      "headers": { "Authorization": "Bearer cald_ab12.9f8e7d6c5b4a" }
+    }
+  }
+}
+```
+
+### Claude Desktop
+
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows, `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS. It uses native streamable HTTP, the same shape as Claude Code, but **it does not expand `${VAR}`** — the token has to be written literally here, so treat the file as a secret and restrict its permissions:
+
+```json
+{
+  "mcpServers": {
+    "caldera": {
+      "type": "http",
+      "url": "http://192.168.1.50:8888/mcp",
+      "headers": { "Authorization": "Bearer cald_ab12.9f8e7d6c5b4a" }
     }
   }
 }
@@ -121,6 +165,8 @@ claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
 > Separately, `mcp-remote` performs OAuth discovery before connecting. Caldera's catch-all route answers `/.well-known/oauth-authorization-server` with the login page as `200 text/html`, so the bridge exits on `JSON.parse` with `Unexpected token '<'`. It also refuses plain-HTTP non-localhost URLs without `--allow-http`.
 >
 > Native HTTP transport avoids all three.
+
+`cald_ab12.9f8e7d6c5b4a` is an illustrative token; use the one printed by `issue`. If a client reports `401`, check that the value actually reached the header: an unexpanded `${CALDERA_MCP_KEY}` arriving verbatim at the server is the usual cause.
 
 ## Configuration
 
