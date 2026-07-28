@@ -99,18 +99,26 @@ claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
 }
 ```
 
-**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`), native streamable HTTP where supported, else the `mcp-remote` bridge:
+**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`) uses native streamable HTTP, the same shape as Claude Code:
 ```json
 {
   "mcpServers": {
     "caldera": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://<caldera-host>:<port>/mcp",
-               "--header", "Authorization: Bearer ${CALDERA_MCP_KEY}"]
+      "type": "http",
+      "url": "http://<caldera-host>:<port>/mcp",
+      "headers": { "Authorization": "Bearer ${CALDERA_MCP_KEY}" }
     }
   }
 }
 ```
+
+> **Do not use the `mcp-remote` bridge with this server.** It fails two independent ways.
+>
+> On Windows, stdio servers are launched as `cmd.exe /c <resolved-exe> <args>`. `npx` resolves to `C:\Program Files\nodejs\npx.cmd`, which is quoted because it contains a space, and the `--header` value is quoted for the same reason. `cmd /c` only preserves quotes when the remainder holds *exactly two* quote characters, so with four it strips the outermost pair, the exe path loses its opening quote, and the launch dies with `'C:\Program' is not recognized as an internal or external command`.
+>
+> Separately, `mcp-remote` performs OAuth discovery before connecting. Caldera's catch-all route answers `/.well-known/oauth-authorization-server` with the login page as `200 text/html`, so the bridge exits on `JSON.parse` with `Unexpected token '<'`. It also refuses plain-HTTP non-localhost URLs without `--allow-http`.
+>
+> Native HTTP transport avoids all three.
 
 ## Configuration
 
