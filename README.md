@@ -48,20 +48,22 @@ This is the inverse of Caldera's bundled `mcp` plugin, which embeds an LLM insid
 
 ## Quick start
 
-1. Install the MCP Python SDK into Caldera's environment:
+Run all three from the Caldera root, with Caldera's virtualenv active.
+
+1. Clone into Caldera's plugins directory. The directory must be named `claudera` — `hook.py` imports `plugins.claudera.*`:
    ```bash
-   pip install "mcp>=1.28.0"
+   git clone https://github.com/sect0r-cybersec/claudera.git plugins/claudera
    ```
-2. Drop this plugin into Caldera's `plugins/claudera` directory and add `claudera` to the `plugins:` list in your Caldera config (`conf/local.yml` or `conf/default.yml`).
-3. Build the magma GUI so the **claudera** panel appears in the nav (once, and after any change to `gui/`):
+2. Install the dependency. The MCP Python SDK is the only one; aiohttp and starlette already come with Caldera:
    ```bash
-   cd plugins/magma && npm run build
+   pip install -r plugins/claudera/requirements.txt
    ```
-4. Restart Caldera and confirm the plugin loaded:
+3. Add `claudera` to the `plugins:` list in `conf/default.yml`, then start Caldera. `--build` compiles the magma GUI so the **claudera** panel appears in the nav (needed once, and after any change to `gui/`):
    ```bash
-   sudo systemctl stop caldera && sudo systemctl start caldera
-   journalctl -u caldera -e
+   python server.py --build --insecure
    ```
+
+`--insecure` runs Caldera with its default configuration and default credentials, which suits the lab-only scope of this plugin. Drop the flag once you have a `conf/local.yml`.
 
 ## Usage
 
