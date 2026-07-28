@@ -50,7 +50,7 @@ This is the inverse of Caldera's bundled `mcp` plugin, which embeds an LLM insid
 
 Run all three from the Caldera root, with Caldera's virtualenv active.
 
-1. Clone into Caldera's plugins directory. The directory must be named `claudera` — `hook.py` imports `plugins.claudera.*`:
+1. Clone into Caldera's plugins directory. The directory must be named `claudera`, because `hook.py` imports `plugins.claudera.*`:
    ```bash
    git clone https://github.com/sect0r-cybersec/claudera.git plugins/claudera
    ```
@@ -82,13 +82,17 @@ python -m plugins.claudera.app.cli activate --key-id <id>
 
 The token format is `cald_<key_id>.<secret>` and is shown only once at issue time. Keys can also be issued, rotated and revoked from the **claudera** GUI panel.
 
-**Claude Code:**
+In the URLs below, `<caldera-host>` and `<port>` are the machine running Caldera and the port it listens on, so the endpoint reads like `http://192.168.1.20:8888/mcp`.
+
+### Claude Code
+
 ```bash
 claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
   --header "Authorization: Bearer $CALDERA_MCP_KEY"
 ```
 
-`.mcp.json` or `~/.claude.json`. The `"type": "http"` field is required (a `url` with no `type` is read as stdio and fails):
+Or configure it by hand in `.mcp.json` or `~/.claude.json`. Set `"type": "http"`, since a `url` with no `type` is read as stdio and fails:
+
 ```json
 {
   "mcpServers": {
@@ -101,13 +105,10 @@ claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
 }
 ```
 
-**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`) cannot take an HTTP endpoint directly. Entries under `mcpServers` are validated against a stdio-only schema — `command` is required, and `type`, `url` and `headers` are not part of it — so an HTTP block is discarded at startup and the server simply never appears. The only trace is a line in `%APPDATA%\Claude\logs\main.log`:
+### Claude Desktop
 
-```
-[warn] Skipped invalid MCP server config entries: { invalidServers: [ 'caldera' ] }
-```
+Claude Desktop accepts stdio servers only, so bridge the endpoint with `mcp-remote` in `%APPDATA%\Claude\claude_desktop_config.json`:
 
-Bridge it with `mcp-remote` instead, which speaks stdio to Claude Desktop and streamable HTTP to Caldera:
 ```json
 {
   "mcpServers": {
@@ -124,38 +125,32 @@ Bridge it with `mcp-remote` instead, which speaks stdio to Claude Desktop and st
 }
 ```
 
-Three details matter, and each one is a silent failure if you get it wrong:
+Copy the `--header` argument exactly:
 
-- **No space in the `--header` argument.** Windows launches stdio servers as `cmd.exe /c <resolved-exe> <args>`. `npx` resolves to `C:\Program Files\nodejs\npx.cmd`, quoted because of the space; a header value written as `"Authorization: Bearer ..."` is quoted for the same reason. `cmd /c` only preserves quotes when the remainder holds exactly two quote characters, so with four it strips the outer pair, the exe path loses its opening quote, and the launch dies with `'C:\Program' is not recognized as an internal or external command`. Keeping the whole header value in one variable leaves the argument space-free. `mcp-remote` substitutes `${CALDERA_MCP_AUTH}` itself, after argument parsing, so the header still reaches Caldera with its space intact.
-- **`--allow-http` is required.** `mcp-remote` refuses plain-HTTP URLs that are not localhost without it.
-- **Include the `Bearer ` prefix in the variable.** Substitution is single-pass, so a variable whose value contains another `${...}` reference is not expanded a second time.
-
-If the resolved header is wrong, the visible error will not mention authentication. `mcp-remote` falls back to OAuth discovery, Caldera's catch-all route answers `/.well-known/oauth-authorization-server` with the login page as `200 text/html`, and the bridge exits on `Unexpected token '<', "<!DOCTYPE "... is not valid JSON`. Read that as *the key never reached the server*, and check the variable first.
+- No space after the colon, and the whole header value in one variable. A space in the argument breaks the launch on Windows. `mcp-remote` expands `${CALDERA_MCP_AUTH}` after parsing, so Caldera still receives a well-formed header.
+- `CALDERA_MCP_AUTH` holds the complete header value, `Bearer ` prefix included. Expansion is single-pass, so the variable cannot itself reference another variable.
+- `--allow-http` is required, because `mcp-remote` refuses non-localhost plain-HTTP URLs without it.
 
 ### Supplying the key
 
-`<caldera-host>` and `<port>` are the machine running Caldera and the port it listens on, so the URL reads like `http://192.168.1.20:8888/mcp`.
-
-`${CALDERA_MCP_KEY}` is an environment variable reference, not a literal. Claude Code expands it when it reads the config, which keeps the raw token out of a file you may well commit. Set the variable, keeping the `Bearer ` prefix in the config untouched:
+`${CALDERA_MCP_KEY}` and `${CALDERA_MCP_AUTH}` are environment variable references, not literals. The client expands them when it reads the config, which keeps the raw token out of a file you may well commit. Claude Code reads `CALDERA_MCP_KEY` (the token alone); the Claude Desktop bridge reads `CALDERA_MCP_AUTH` (the token with the `Bearer ` prefix).
 
 ```powershell
-[Environment]::SetEnvironmentVariable('CALDERA_MCP_KEY', (Read-Host 'Key'), 'User')
+[Environment]::SetEnvironmentVariable('CALDERA_MCP_KEY',  (Read-Host 'Key'),          'User')
+[Environment]::SetEnvironmentVariable('CALDERA_MCP_AUTH', "Bearer $(Read-Host 'Key')", 'User')
 ```
 ```bash
 export CALDERA_MCP_KEY=cald_...    # add to ~/.bashrc or ~/.zshrc to persist
 ```
 
-Restart the client afterwards so it inherits the new environment. If your client does not expand `${...}`, replace the whole `${CALDERA_MCP_KEY}` token with the raw key instead.
+Clients take their environment at launch, so quit the client completely and reopen; reloading the window is not enough. If your client does not expand `${...}`, substitute the raw key in the config instead.
 
-The Claude Desktop bridge above reads `CALDERA_MCP_AUTH` rather than `CALDERA_MCP_KEY`, and its value is the complete header — `Bearer ` included:
+Prefer the calls above to `setx`, which records the token in your shell history and silently truncates values over 1024 characters. Either way the value is stored in plain text under `HKCU\Environment`, so this protects the key from reaching a repository, not from local disclosure.
 
-```powershell
-[Environment]::SetEnvironmentVariable('CALDERA_MCP_AUTH', "Bearer $(Read-Host 'Key')", 'User')
-```
+### Troubleshooting
 
-Nothing else is needed: `mcp-remote` reads the variable out of the environment it inherits from Claude Desktop, so the config above carries no `env` block and the token never lands in a file. Claude Desktop takes its environment at launch, so quit it completely and reopen — reloading the window is not enough.
-
-On Windows, `setx CALDERA_MCP_KEY <key>` (or `setx CALDERA_MCP_AUTH "Bearer <key>"`) sets the same variable but puts the token on a command line that PowerShell records in its history file, and it silently truncates values over 1024 characters. The `SetEnvironmentVariable` calls above avoid both; `sysdm.cpl` → Advanced → Environment Variables does the same through the GUI. Note that either way the value is stored in plain text under `HKCU\Environment`, readable by anything running as you — the protection this buys is against the key reaching a repository, not against local disclosure.
+- **The server never appears in Claude Desktop, with `Skipped invalid MCP server config entries` in `%APPDATA%\Claude\logs\main.log`.** The entry is an HTTP block. Use the `mcp-remote` bridge above.
+- **`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`.** The key never reached Caldera, so `mcp-remote` fell back to OAuth discovery and parsed a login page. Check `CALDERA_MCP_AUTH` is set, includes `Bearer `, and that the client has been restarted.
 
 ## Configuration
 
