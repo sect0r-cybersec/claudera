@@ -114,13 +114,22 @@ claude mcp add --transport http caldera http://<caldera-host>:<port>/mcp \
 }
 ```
 
-> **Do not use the `mcp-remote` bridge with this server.** It fails two independent ways.
->
-> On Windows, stdio servers are launched as `cmd.exe /c <resolved-exe> <args>`. `npx` resolves to `C:\Program Files\nodejs\npx.cmd`, which is quoted because it contains a space, and the `--header` value is quoted for the same reason. `cmd /c` only preserves quotes when the remainder holds *exactly two* quote characters, so with four it strips the outermost pair, the exe path loses its opening quote, and the launch dies with `'C:\Program' is not recognized as an internal or external command`.
->
-> Separately, `mcp-remote` performs OAuth discovery before connecting. Caldera's catch-all route answers `/.well-known/oauth-authorization-server` with the login page as `200 text/html`, so the bridge exits on `JSON.parse` with `Unexpected token '<'`. It also refuses plain-HTTP non-localhost URLs without `--allow-http`.
->
-> Native HTTP transport avoids all three.
+### Supplying the key
+
+`<caldera-host>` and `<port>` are the machine running Caldera and the port it listens on, so the URL reads like `http://192.168.1.20:8888/mcp`.
+
+`${CALDERA_MCP_KEY}` is an environment variable reference, not a literal. Claude Code expands it when it reads the config, which keeps the raw token out of a file you may well commit. Set the variable, keeping the `Bearer ` prefix in the config untouched:
+
+```powershell
+[Environment]::SetEnvironmentVariable('CALDERA_MCP_KEY', (Read-Host 'Key'), 'User')
+```
+```bash
+export CALDERA_MCP_KEY=cald_...    # add to ~/.bashrc or ~/.zshrc to persist
+```
+
+Restart the client afterwards so it inherits the new environment. If your client does not expand `${...}`, replace the whole `${CALDERA_MCP_KEY}` token with the raw key instead.
+
+On Windows, `setx CALDERA_MCP_KEY <key>` sets the same variable but puts the token on a command line that PowerShell records in its history file, and it silently truncates values over 1024 characters. The `SetEnvironmentVariable` call above avoids both; `sysdm.cpl` → Advanced → Environment Variables does the same through the GUI. Note that either way the value is stored in plain text under `HKCU\Environment`, readable by anything running as you — the protection this buys is against the key reaching a repository, not against local disclosure.
 
 ## Configuration
 
