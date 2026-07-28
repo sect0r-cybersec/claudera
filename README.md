@@ -113,11 +113,16 @@ Claude Desktop accepts stdio servers only, so bridge the endpoint with `mcp-remo
     "caldera": {
       "command": "npx",
       "args": [
-        "-y", "mcp-remote",
+        "-y",
+        "mcp-remote",
         "http://<caldera-host>:<port>/mcp",
-        "--header", "Authorization:${CALDERA_MCP_AUTH}",
+        "--header",
+        "Authorization:${CALDERA_MCP_AUTH}",
         "--allow-http"
-      ]
+      ],
+      "env": {
+        "CALDERA_MCP_AUTH": "Bearer cald_<key_id>.<secret>"
+      }
     }
   }
 }
