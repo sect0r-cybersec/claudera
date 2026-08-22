@@ -38,11 +38,10 @@ class TestKeyStore(unittest.TestCase):
         self.assertIsNotNone(self.store.validate(token))
         self.assertTrue(self.store.revoke(key_id))
         self.assertIsNone(self.store.validate(token))
-        # Revocation is permanent: there is no reactivation path, and rotate
-        # must not bring a revoked key back to life.
+        # Revocation is permanent: there is no reactivation path, and there is
+        # no rotate path that could bring a key back to life.
         self.assertFalse(hasattr(self.store, "set_active"))
-        self.assertIsNone(self.store.rotate(key_id))
-        self.assertIsNone(self.store.validate(token))
+        self.assertFalse(hasattr(self.store, "rotate"))
         self.assertFalse(self.store.get(key_id).active)
 
     def test_delete_removes_key(self):
@@ -53,12 +52,14 @@ class TestKeyStore(unittest.TestCase):
         # Deleting a missing key is a no-op that reports False.
         self.assertFalse(self.store.delete(key_id))
 
-    def test_rotate_invalidates_old_secret(self):
+    def test_delete_of_active_key_revokes_first(self):
+        # Deleting an active key must disable it as part of the same operation,
+        # so a deleted key can never authenticate even mid-flight.
         key_id, token = self.store.issue("red", "red")
-        new_token = self.store.rotate(key_id)
-        self.assertNotEqual(token, new_token)
-        self.assertIsNone(self.store.validate(token))       # old secret dead
-        self.assertIsNotNone(self.store.validate(new_token))  # new secret works
+        self.assertTrue(self.store.get(key_id).active)
+        self.assertTrue(self.store.delete(key_id))
+        self.assertIsNone(self.store.validate(token))
+        self.assertIsNone(self.store.get(key_id))
 
     def test_download_and_event_logs(self):
         self.store.log_download(username="red", source="atomic-red-team",
