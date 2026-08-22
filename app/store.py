@@ -136,25 +136,6 @@ class KeyStore:
             )
         return key_id, token
 
-    def rotate(self, key_id: str) -> str | None:
-        """Replace an *active* key's secret (same key_id, same user). Returns the
-        new token, or None if the key is missing or revoked.
-
-        Revocation is terminal: a revoked key cannot be brought back, so rotate
-        only touches active rows and never flips ``active`` back on.
-        """
-        secret = secrets.token_urlsafe(32)
-        key_hash = self._hasher.hash(secret)
-        with self._lock, self._connect() as conn:
-            cur = conn.execute(
-                "UPDATE mcp_keys SET key_hash=?, created_at=?, last_used_at=NULL "
-                "WHERE key_id=? AND active=1",
-                (key_hash, _utc_now(), key_id),
-            )
-            if cur.rowcount == 0:
-                return None
-        return f"{TOKEN_PREFIX}{key_id}.{secret}"
-
     def revoke(self, key_id: str) -> bool:
         """Disable a key permanently. A revoked key can never be reactivated;
         the only remaining action is :meth:`delete`."""
@@ -165,8 +146,13 @@ class KeyStore:
             return cur.rowcount > 0
 
     def delete(self, key_id: str) -> bool:
-        """Remove a key row entirely. Irreversible."""
+        """Revoke and then remove a key row entirely. Irreversible.
+
+        Deleting always revokes first: the key is disabled in the same
+        transaction that removes it, so a deleted key can never authenticate
+        regardless of when the row removal is observed."""
         with self._lock, self._connect() as conn:
+            conn.execute("UPDATE mcp_keys SET active=0 WHERE key_id=?", (key_id,))
             cur = conn.execute("DELETE FROM mcp_keys WHERE key_id=?", (key_id,))
             return cur.rowcount > 0
 

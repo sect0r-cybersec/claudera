@@ -2,7 +2,7 @@
   claudera magma GUI panel.
 
   Two tabs: Run History (runs grouped by MCP session, events, payload downloads)
-  and Keys (issue / rotate / revoke / delete your own bearer keys). Data comes
+  and Keys (issue / revoke / delete your own bearer keys). Data comes
   from the authenticated /plugin/claudera/api/* endpoints (see app/gui_api.py).
   Each user only ever sees and manages their own keys.
 
@@ -112,7 +112,7 @@
         <h2 class="subtitle is-5 mb-0">Keys</h2>
         <button class="button is-small" @click="fetchKeys" :class="{ 'is-loading': isLoading }">Refresh</button>
       </div>
-      <p class="is-size-7 has-text-grey mb-3">Your bearer keys for this MCP server. Rotate replaces a key's secret (the key id stays the same). Revoke disables a key permanently — a revoked key cannot be turned back on and can only be deleted. Delete removes the key for good.</p>
+      <p class="is-size-7 has-text-grey mb-3">Your bearer keys for this MCP server. Revoke disables a key permanently — a revoked key cannot be turned back on and can only be deleted. Delete removes the key for good (and revokes it in the same step). To replace a key, revoke or delete the old one and issue a new key.</p>
       <table class="table is-fullwidth is-striped is-narrow is-hoverable">
         <thead>
           <tr><th>Key id</th><th>User</th><th>Group</th><th>Active</th><th>Created (UTC)</th><th>Last used</th><th>Actions</th></tr>
@@ -123,7 +123,6 @@
             <td><span class="tag" :class="k.active ? 'is-success' : 'is-danger'">{{ k.active ? 'active' : 'revoked' }}</span></td>
             <td>{{ k.created_at }}</td><td>{{ k.last_used_at || '-' }}</td>
             <td>
-              <button v-if="k.active" class="button is-small mr-1" @click="rotateKey(k.key_id)">Rotate</button>
               <button v-if="k.active" class="button is-small is-danger is-light mr-1" @click="revokeKey(k.key_id)">Revoke</button>
               <button class="button is-small is-danger" @click="deleteKey(k.key_id)">Delete</button>
             </td>
@@ -219,18 +218,6 @@ async function issueKey() {
     fail(err, "Failed to issue key.");
   } finally {
     isBusy.value = false;
-  }
-}
-
-async function rotateKey(keyId) {
-  errorMessage.value = "";
-  try {
-    const res = await $api.post("/plugin/claudera/api/keys/rotate", { key_id: keyId });
-    newToken.value = res.data.token;
-    tab.value = "keys";
-    await fetchKeys();
-  } catch (err) {
-    fail(err, "Failed to rotate key.");
   }
 }
 

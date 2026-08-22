@@ -75,14 +75,13 @@ Issue a per-user key from the Caldera root (the group is resolved from Caldera's
 # Issue a key for a user
 python -m plugins.claudera.app.cli issue --user red
 
-# List, rotate, revoke (permanent), or delete
+# List, revoke (permanent), or delete
 python -m plugins.claudera.app.cli list
-python -m plugins.claudera.app.cli rotate --key-id <id>
 python -m plugins.claudera.app.cli revoke --key-id <id>
 python -m plugins.claudera.app.cli delete --key-id <id>
 ```
 
-The token format is `cald_<key_id>.<secret>` and is shown only once at issue time. Keys can also be issued, rotated and revoked from the **claudera** GUI panel.
+The token format is `cald_<key_id>.<secret>` and is shown only once at issue time. A key's lifecycle is create → revoke → delete: there is no rotate. To replace a key, revoke or delete the old one and issue a new key. Deleting a key revokes it in the same step. Keys can also be issued, revoked and deleted from the **claudera** GUI panel.
 
 ### Claude Code
 
@@ -175,7 +174,7 @@ A stdlib `unittest` suite with no extra dependencies. Run from the Caldera root 
 python -m unittest discover -s plugins/claudera/tests -t .
 ```
 
-It covers the naming helper, the key store and auth resolution (valid, invalid, revoked, rotated), the run-history and download logs, and payload allow-list classification and hash verification (including a deliberate mismatch). An optional live integration test runs against a running endpoint when `CLAUDERA_MCP_URL` and `CLAUDERA_MCP_KEY` are set:
+It covers the naming helper, the key store and auth resolution (valid, invalid, revoked, deleted), the run-history and download logs, and payload allow-list classification and hash verification (including a deliberate mismatch). An optional live integration test runs against a running endpoint when `CLAUDERA_MCP_URL` and `CLAUDERA_MCP_KEY` are set:
 
 ```bash
 CLAUDERA_MCP_URL=http://<host>:8888/mcp CLAUDERA_MCP_KEY=cald_... \

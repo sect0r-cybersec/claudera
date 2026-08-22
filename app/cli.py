@@ -1,8 +1,8 @@
 """Command-line key administration for claudera.
 
-Issue, list, rotate, and revoke per-user MCP bearer keys from the shell. The GUI
-equivalent lands in a later build step; this CLI is the interim admin path and is
-handy for tests and automation.
+Issue, list, revoke, and delete per-user MCP bearer keys from the shell. A key's
+lifecycle is create -> revoke -> delete; there is no rotate. The GUI panel is the
+primary admin path, and this CLI is handy for tests and automation.
 
 The group for a key is taken from Caldera's own ``users`` config so a key can
 only map to a real user's real group.
@@ -11,8 +11,8 @@ Run from the Caldera root with the Caldera venv, e.g.::
 
     python -m plugins.claudera.app.cli issue --user red
     python -m plugins.claudera.app.cli list
-    python -m plugins.claudera.app.cli rotate --key-id <id>
     python -m plugins.claudera.app.cli revoke --key-id <id>
+    python -m plugins.claudera.app.cli delete --key-id <id>
 
 This file is original to the claudera plugin (Apache-2.0).
 """
@@ -73,20 +73,6 @@ def _cmd_list(store: KeyStore, args) -> int:
     return 0
 
 
-def _cmd_rotate(store: KeyStore, args) -> int:
-    token = store.rotate(args.key_id)
-    if token is None:
-        rec = store.get(args.key_id)
-        if rec is None:
-            print(f"error: no key with key_id '{args.key_id}'", file=sys.stderr)
-        else:
-            print(f"error: key '{args.key_id}' is revoked; revocation is permanent. "
-                  f"Delete it and issue a new one.", file=sys.stderr)
-        return 2
-    print(f"Rotated key '{args.key_id}'. New token (shown ONCE):\n  {token}")
-    return 0
-
-
 def _cmd_revoke(store: KeyStore, args) -> int:
     ok = store.revoke(args.key_id)
     print(f"Revoked '{args.key_id}' (permanent; delete it to remove)." if ok
@@ -114,10 +100,6 @@ def build_parser() -> argparse.ArgumentParser:
     pl = sub.add_parser("list", help="List keys.")
     pl.add_argument("--user", help="Filter by user.")
     pl.set_defaults(func=_cmd_list)
-
-    pr = sub.add_parser("rotate", help="Rotate a key's secret.")
-    pr.add_argument("--key-id", required=True)
-    pr.set_defaults(func=_cmd_rotate)
 
     prv = sub.add_parser("revoke", help="Revoke a key permanently (cannot be reactivated).")
     prv.add_argument("--key-id", required=True)

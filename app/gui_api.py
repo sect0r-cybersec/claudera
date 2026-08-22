@@ -77,21 +77,6 @@ class ClauderaGuiApi:
         return rec, None
 
     @check_authorization
-    async def rotate_key(self, request):
-        rec, err = await self._owned_key_or_error(request)
-        if err:
-            return err
-        if not rec.active:
-            return web.json_response(
-                {"error": "this key is revoked; revocation is permanent. Delete it and issue a new one."},
-                status=409,
-            )
-        token = self.store.rotate(rec.key_id)
-        if token is None:
-            return web.json_response({"error": "key could not be rotated"}, status=409)
-        return web.json_response({"key_id": rec.key_id, "token": token})
-
-    @check_authorization
     async def revoke_key(self, request):
         rec, err = await self._owned_key_or_error(request)
         if err:
@@ -113,6 +98,5 @@ class ClauderaGuiApi:
         router.add_get("/plugin/claudera/api/downloads", self.downloads)
         router.add_get("/plugin/claudera/api/keys", self.keys)
         router.add_post("/plugin/claudera/api/keys/issue", self.issue_key)
-        router.add_post("/plugin/claudera/api/keys/rotate", self.rotate_key)
         router.add_post("/plugin/claudera/api/keys/revoke", self.revoke_key)
         router.add_post("/plugin/claudera/api/keys/delete", self.delete_key)
