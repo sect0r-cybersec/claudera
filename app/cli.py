@@ -76,7 +76,12 @@ def _cmd_list(store: KeyStore, args) -> int:
 def _cmd_rotate(store: KeyStore, args) -> int:
     token = store.rotate(args.key_id)
     if token is None:
-        print(f"error: no key with key_id '{args.key_id}'", file=sys.stderr)
+        rec = store.get(args.key_id)
+        if rec is None:
+            print(f"error: no key with key_id '{args.key_id}'", file=sys.stderr)
+        else:
+            print(f"error: key '{args.key_id}' is revoked; revocation is permanent. "
+                  f"Delete it and issue a new one.", file=sys.stderr)
         return 2
     print(f"Rotated key '{args.key_id}'. New token (shown ONCE):\n  {token}")
     return 0
@@ -84,13 +89,14 @@ def _cmd_rotate(store: KeyStore, args) -> int:
 
 def _cmd_revoke(store: KeyStore, args) -> int:
     ok = store.revoke(args.key_id)
-    print(f"Revoked '{args.key_id}'." if ok else f"error: no key with key_id '{args.key_id}'")
+    print(f"Revoked '{args.key_id}' (permanent; delete it to remove)." if ok
+          else f"error: no key with key_id '{args.key_id}'")
     return 0 if ok else 2
 
 
-def _cmd_activate(store: KeyStore, args) -> int:
-    ok = store.set_active(args.key_id, True)
-    print(f"Activated '{args.key_id}'." if ok else f"error: no key with key_id '{args.key_id}'")
+def _cmd_delete(store: KeyStore, args) -> int:
+    ok = store.delete(args.key_id)
+    print(f"Deleted '{args.key_id}'." if ok else f"error: no key with key_id '{args.key_id}'")
     return 0 if ok else 2
 
 
@@ -113,13 +119,13 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--key-id", required=True)
     pr.set_defaults(func=_cmd_rotate)
 
-    prv = sub.add_parser("revoke", help="Revoke (deactivate) a key.")
+    prv = sub.add_parser("revoke", help="Revoke a key permanently (cannot be reactivated).")
     prv.add_argument("--key-id", required=True)
     prv.set_defaults(func=_cmd_revoke)
 
-    pa = sub.add_parser("activate", help="Re-activate a revoked key.")
-    pa.add_argument("--key-id", required=True)
-    pa.set_defaults(func=_cmd_activate)
+    pd = sub.add_parser("delete", help="Delete a key permanently.")
+    pd.add_argument("--key-id", required=True)
+    pd.set_defaults(func=_cmd_delete)
     return p
 
 

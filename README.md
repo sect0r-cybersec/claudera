@@ -40,6 +40,8 @@ This is the inverse of Caldera's bundled `mcp` plugin, which embeds an LLM insid
 | Connectivity | `server_info`, `ping` |
 | Read agents | `list_agents` |
 | Creation | `create_ability`, `create_adversary`, `create_operation` |
+| Deletion | `delete_ability`, `delete_adversary`, `delete_operation` |
+| Export | `export_ability`, `export_adversary`, `export_operation` |
 | Execution control | `start_operation`, `pause_operation`, `resume_operation`, `stop_operation`, `get_operation_status` |
 | Read-back | `get_operation_report`, `query_facts`, `list_abilities`, `list_adversaries`, `list_operations` |
 | Correlation | `get_correlation_keys` |
@@ -73,11 +75,11 @@ Issue a per-user key from the Caldera root (the group is resolved from Caldera's
 # Issue a key for a user
 python -m plugins.claudera.app.cli issue --user red
 
-# List, rotate, revoke, or re-activate
+# List, rotate, revoke (permanent), or delete
 python -m plugins.claudera.app.cli list
-python -m plugins.claudera.app.cli rotate   --key-id <id>
-python -m plugins.claudera.app.cli revoke   --key-id <id>
-python -m plugins.claudera.app.cli activate --key-id <id>
+python -m plugins.claudera.app.cli rotate --key-id <id>
+python -m plugins.claudera.app.cli revoke --key-id <id>
+python -m plugins.claudera.app.cli delete --key-id <id>
 ```
 
 The token format is `cald_<key_id>.<secret>` and is shown only once at issue time. Keys can also be issued, rotated and revoked from the **claudera** GUI panel.
@@ -139,7 +141,8 @@ Set in `conf/default.yml`:
 - `mcp.security` controls DNS-rebinding and Host-header protection. Off by default for LAN use; set `enable_dns_rebinding_protection: true` and populate `allowed_hosts` / `allowed_origins` to harden.
 - `payloads.allow_list` is the trusted set of remote sources (host plus `path_prefix`). An off-list URL needs `confirm=true`. Defaults: Atomic Red Team and the MITRE stockpile.
 - `payloads.download_dir` is where fetched payloads land (default `payloads/downloaded`, gitignored). `payloads.max_download_bytes` caps size (default 50 MiB).
-- `gui.admin_users` lists Caldera users who may manage anyone's keys from the GUI (default: none; users manage their own).
+
+Key management in the GUI is strictly per-user: each logged-in Caldera user only sees and manages their own bearer keys. Revoking a key is permanent — a revoked key cannot be reactivated, only deleted.
 
 ## Security notes
 

@@ -15,8 +15,12 @@ This file is original to the claudera plugin (Apache-2.0).
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from collections import Counter
 from datetime import datetime
+
+import yaml
 
 from app.utility.base_world import BaseWorld
 
@@ -255,6 +259,77 @@ async def _list_operations(ctx: ToolContext, args: dict) -> dict:
     return {"count": len(rows), "operations": rows}
 
 
+# -- delete -------------------------------------------------------------------
+
+async def _locate_one(ctx: ToolContext, ram_key: str, match: dict, label: str):
+    """Locate a single object the caller's group may see, or raise."""
+    objs = [o for o in await ctx.services["data_svc"].locate(ram_key, match=match) if _visible(ctx, o)]
+    if not objs:
+        raise ValueError(f"unknown or inaccessible {label}: {next(iter(match.values()))}")
+    return objs[0]
+
+
+async def _delete_operation(ctx: ToolContext, args: dict) -> dict:
+    op = await _get_operation(ctx, args["operation_id"])
+    name = op.name
+    # rest_svc.delete_operation also clears the operation's source, result
+    # files, and fact yml files.
+    await ctx.services["rest_svc"].delete_operation({"id": op.id})
+    return {"status": "deleted", "operation_id": op.id, "name": name}
+
+
+async def _delete_ability(ctx: ToolContext, args: dict) -> dict:
+    ab = await _locate_one(ctx, "abilities", dict(ability_id=args["ability_id"]), "ability id")
+    name = ab.name
+    await ctx.services["rest_svc"].delete_ability({"ability_id": ab.ability_id})
+    return {"status": "deleted", "ability_id": ab.ability_id, "name": name}
+
+
+async def _delete_adversary(ctx: ToolContext, args: dict) -> dict:
+    adv = await _locate_one(ctx, "adversaries", dict(adversary_id=args["adversary_id"]), "adversary id")
+    name = adv.name
+    await ctx.services["rest_svc"].delete_adversary({"adversary_id": adv.adversary_id})
+    return {"status": "deleted", "adversary_id": adv.adversary_id, "name": name}
+
+
+# -- export -------------------------------------------------------------------
+
+async def _on_disk_yaml(ctx: ToolContext, obj_id: str, fallback_display: dict) -> str:
+    """Return the object's on-disk YAML (byte-for-byte how Caldera stores it),
+    falling back to a schema dump for objects that live only in memory."""
+    try:
+        _, path = await ctx.services["file_svc"].find_file_path(f"{obj_id}.yml", location="data")
+    except Exception:
+        path = None
+    if path and os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read()
+    return yaml.safe_dump([fallback_display], sort_keys=False, allow_unicode=True)
+
+
+async def _export_ability(ctx: ToolContext, args: dict) -> dict:
+    ab = await _locate_one(ctx, "abilities", dict(ability_id=args["ability_id"]), "ability id")
+    content = await _on_disk_yaml(ctx, ab.ability_id, ab.display)
+    return {"status": "exported", "ability_id": ab.ability_id, "name": ab.name,
+            "format": "yaml", "filename": f"{ab.ability_id}.yml", "content": content}
+
+
+async def _export_adversary(ctx: ToolContext, args: dict) -> dict:
+    adv = await _locate_one(ctx, "adversaries", dict(adversary_id=args["adversary_id"]), "adversary id")
+    content = await _on_disk_yaml(ctx, adv.adversary_id, adv.display)
+    return {"status": "exported", "adversary_id": adv.adversary_id, "name": adv.name,
+            "format": "yaml", "filename": f"{adv.adversary_id}.yml", "content": content}
+
+
+async def _export_operation(ctx: ToolContext, args: dict) -> dict:
+    op = await _get_operation(ctx, args["operation_id"])
+    report = await op.report(ctx.services["file_svc"], ctx.services["data_svc"],
+                             output=bool(args.get("include_output", False)))
+    content = json.dumps(report, indent=2, default=str)
+    return {"status": "exported", "operation_id": op.id, "name": op.name,
+            "format": "json", "filename": f"{op.name}.json", "content": content}
+
+
 # -- registration -------------------------------------------------------------
 
 def _op_id_schema(extra: dict | None = None) -> dict:
@@ -309,4 +384,54 @@ def register(registry: Registry) -> None:
         name="list_operations", description="List operations, newest first.",
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         handler=_list_operations,
+    ))
+
+    # -- delete (mutating) ----------------------------------------------------
+    registry.add(ToolSpec(
+        name="delete_operation",
+        description="Permanently delete an operation (and its results, source, and collected facts). Irreversible.",
+        input_schema=_op_id_schema(), handler=_delete_operation, mutating=True,
+    ))
+    registry.add(ToolSpec(
+        name="delete_ability",
+        description="Permanently delete an ability by id (removes it from memory and disk). Irreversible.",
+        input_schema={"type": "object", "properties": {"ability_id": {"type": "string"}},
+                      "required": ["ability_id"], "additionalProperties": False},
+        handler=_delete_ability, mutating=True,
+    ))
+    registry.add(ToolSpec(
+        name="delete_adversary",
+        description="Permanently delete an adversary profile by id (removes it from memory and disk). Irreversible.",
+        input_schema={"type": "object", "properties": {"adversary_id": {"type": "string"}},
+                      "required": ["adversary_id"], "additionalProperties": False},
+        handler=_delete_adversary, mutating=True,
+    ))
+
+    # -- export (read-only) ---------------------------------------------------
+    registry.add(ToolSpec(
+        name="export_ability",
+        description=("Fetch an ability's full definition as Caldera stores it (YAML). Returns "
+                     "'content' (the file body), 'filename', and 'format' so the client can save it "
+                     "and commit it to GitHub or share it."),
+        input_schema={"type": "object", "properties": {"ability_id": {"type": "string"}},
+                      "required": ["ability_id"], "additionalProperties": False},
+        handler=_export_ability,
+    ))
+    registry.add(ToolSpec(
+        name="export_adversary",
+        description=("Fetch an adversary profile's full definition as Caldera stores it (YAML). Returns "
+                     "'content', 'filename', and 'format' so the client can save it and share it. Note the "
+                     "profile references ability ids; export those separately to reproduce it elsewhere."),
+        input_schema={"type": "object", "properties": {"adversary_id": {"type": "string"}},
+                      "required": ["adversary_id"], "additionalProperties": False},
+        handler=_export_adversary,
+    ))
+    registry.add(ToolSpec(
+        name="export_operation",
+        description=("Fetch an operation's full report as JSON. Returns 'content' (the file body), "
+                     "'filename', and 'format' so the client can save it. Set include_output to embed "
+                     "command output."),
+        input_schema=_op_id_schema({"include_output": {"type": "boolean",
+                     "description": "Include command output in the report (default false)."}}),
+        handler=_export_operation,
     ))
