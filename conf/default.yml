@@ -22,11 +22,6 @@ mcp:
     allowed_hosts: []
     allowed_origins: []
 
-gui:
-  # Caldera users who may manage ANY user's keys from the GUI. Others can only
-  # manage their own. Empty by default.
-  admin_users: []
-
 payloads:
   # Downloaded payloads land here (relative to the plugin dir). Caldera resolves
   # payloads recursively under plugins/<name>/payloads, so abilities can

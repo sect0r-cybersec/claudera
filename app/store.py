@@ -137,29 +137,38 @@ class KeyStore:
         return key_id, token
 
     def rotate(self, key_id: str) -> str | None:
-        """Replace a key's secret (same key_id, same user). Returns the new token."""
+        """Replace an *active* key's secret (same key_id, same user). Returns the
+        new token, or None if the key is missing or revoked.
+
+        Revocation is terminal: a revoked key cannot be brought back, so rotate
+        only touches active rows and never flips ``active`` back on.
+        """
         secret = secrets.token_urlsafe(32)
         key_hash = self._hasher.hash(secret)
         with self._lock, self._connect() as conn:
             cur = conn.execute(
-                "UPDATE mcp_keys SET key_hash=?, created_at=?, last_used_at=NULL, active=1 "
-                "WHERE key_id=?",
+                "UPDATE mcp_keys SET key_hash=?, created_at=?, last_used_at=NULL "
+                "WHERE key_id=? AND active=1",
                 (key_hash, _utc_now(), key_id),
             )
             if cur.rowcount == 0:
                 return None
         return f"{TOKEN_PREFIX}{key_id}.{secret}"
 
-    def set_active(self, key_id: str, active: bool) -> bool:
+    def revoke(self, key_id: str) -> bool:
+        """Disable a key permanently. A revoked key can never be reactivated;
+        the only remaining action is :meth:`delete`."""
         with self._lock, self._connect() as conn:
             cur = conn.execute(
-                "UPDATE mcp_keys SET active=? WHERE key_id=?",
-                (1 if active else 0, key_id),
+                "UPDATE mcp_keys SET active=0 WHERE key_id=?", (key_id,)
             )
             return cur.rowcount > 0
 
-    def revoke(self, key_id: str) -> bool:
-        return self.set_active(key_id, False)
+    def delete(self, key_id: str) -> bool:
+        """Remove a key row entirely. Irreversible."""
+        with self._lock, self._connect() as conn:
+            cur = conn.execute("DELETE FROM mcp_keys WHERE key_id=?", (key_id,))
+            return cur.rowcount > 0
 
     # -- validation ------------------------------------------------------------
 

@@ -33,14 +33,25 @@ class TestKeyStore(unittest.TestCase):
         self.assertIsNone(self.store.validate("not-even-a-token"))
         self.assertIsNone(self.store.validate(""))
 
-    def test_revoked_key_rejected(self):
+    def test_revoke_is_terminal(self):
         key_id, token = self.store.issue("red", "red")
         self.assertIsNotNone(self.store.validate(token))
-        self.store.revoke(key_id)
+        self.assertTrue(self.store.revoke(key_id))
         self.assertIsNone(self.store.validate(token))
-        # re-activation restores it
-        self.store.set_active(key_id, True)
-        self.assertIsNotNone(self.store.validate(token))
+        # Revocation is permanent: there is no reactivation path, and rotate
+        # must not bring a revoked key back to life.
+        self.assertFalse(hasattr(self.store, "set_active"))
+        self.assertIsNone(self.store.rotate(key_id))
+        self.assertIsNone(self.store.validate(token))
+        self.assertFalse(self.store.get(key_id).active)
+
+    def test_delete_removes_key(self):
+        key_id, token = self.store.issue("red", "red")
+        self.assertTrue(self.store.delete(key_id))
+        self.assertIsNone(self.store.get(key_id))
+        self.assertIsNone(self.store.validate(token))
+        # Deleting a missing key is a no-op that reports False.
+        self.assertFalse(self.store.delete(key_id))
 
     def test_rotate_invalidates_old_secret(self):
         key_id, token = self.store.issue("red", "red")

@@ -2,8 +2,9 @@
   claudera magma GUI panel.
 
   Two tabs: Run History (runs grouped by MCP session, events, payload downloads)
-  and Keys (issue / rotate / revoke per-user bearer keys). Data comes from the
-  authenticated /plugin/claudera/api/* endpoints (see app/gui_api.py).
+  and Keys (issue / rotate / revoke / delete your own bearer keys). Data comes
+  from the authenticated /plugin/claudera/api/* endpoints (see app/gui_api.py).
+  Each user only ever sees and manages their own keys.
 
   Structure and magma/Bulma conventions are adapted from the bundled mcp plugin's
   history component (plugins/mcp/gui/views/mcp_history.vue), Apache-2.0.
@@ -94,14 +95,10 @@
     <div v-if="tab === 'keys'">
       <div class="box">
         <h2 class="subtitle is-5">Issue a key</h2>
-        <p class="is-size-7 has-text-grey mb-3">Create a new bearer key for a Caldera user (leave blank to issue one for yourself). The token is shown once here, then only its hash is stored. Paste it as the Authorization Bearer value in your Claude client.</p>
-        <div class="field has-addons">
+        <p class="is-size-7 has-text-grey mb-3">Create a new bearer key for yourself. The token is shown once here, then only its hash is stored. Paste it as the Authorization Bearer value in your Claude client.</p>
+        <div class="field">
           <div class="control">
-            <input class="input" type="text" v-model="issueUsername"
-                   placeholder="username (blank = yourself)">
-          </div>
-          <div class="control">
-            <button class="button is-primary" @click="issueKey" :class="{ 'is-loading': isBusy }">Issue</button>
+            <button class="button is-primary" @click="issueKey" :class="{ 'is-loading': isBusy }">Issue a key</button>
           </div>
         </div>
         <div v-if="newToken" class="notification is-warning is-light">
@@ -115,7 +112,7 @@
         <h2 class="subtitle is-5 mb-0">Keys</h2>
         <button class="button is-small" @click="fetchKeys" :class="{ 'is-loading': isLoading }">Refresh</button>
       </div>
-      <p class="is-size-7 has-text-grey mb-3">The bearer keys for this MCP server. Rotate replaces a key's secret (the key id stays the same), Revoke disables a key, and Activate turns a revoked key back on.</p>
+      <p class="is-size-7 has-text-grey mb-3">Your bearer keys for this MCP server. Rotate replaces a key's secret (the key id stays the same). Revoke disables a key permanently — a revoked key cannot be turned back on and can only be deleted. Delete removes the key for good.</p>
       <table class="table is-fullwidth is-striped is-narrow is-hoverable">
         <thead>
           <tr><th>Key id</th><th>User</th><th>Group</th><th>Active</th><th>Created (UTC)</th><th>Last used</th><th>Actions</th></tr>
@@ -126,9 +123,9 @@
             <td><span class="tag" :class="k.active ? 'is-success' : 'is-danger'">{{ k.active ? 'active' : 'revoked' }}</span></td>
             <td>{{ k.created_at }}</td><td>{{ k.last_used_at || '-' }}</td>
             <td>
-              <button class="button is-small mr-1" @click="rotateKey(k.key_id)">Rotate</button>
-              <button v-if="k.active" class="button is-small is-danger is-light" @click="revokeKey(k.key_id)">Revoke</button>
-              <button v-else class="button is-small is-success is-light" @click="activateKey(k.key_id)">Activate</button>
+              <button v-if="k.active" class="button is-small mr-1" @click="rotateKey(k.key_id)">Rotate</button>
+              <button v-if="k.active" class="button is-small is-danger is-light mr-1" @click="revokeKey(k.key_id)">Revoke</button>
+              <button class="button is-small is-danger" @click="deleteKey(k.key_id)">Delete</button>
             </td>
           </tr>
           <tr v-if="!keys.length"><td colspan="7" class="has-text-grey">No keys.</td></tr>
@@ -154,7 +151,6 @@ const downloads = ref([]);
 const selectedSession = ref(null);
 
 const keys = ref([]);
-const issueUsername = ref("");
 const newToken = ref("");
 
 function shortId(id) {
@@ -216,10 +212,8 @@ async function issueKey() {
   errorMessage.value = "";
   newToken.value = "";
   try {
-    const body = issueUsername.value ? { username: issueUsername.value } : {};
-    const res = await $api.post("/plugin/claudera/api/keys/issue", body);
+    const res = await $api.post("/plugin/claudera/api/keys/issue", {});
     newToken.value = res.data.token;
-    issueUsername.value = "";
     await fetchKeys();
   } catch (err) {
     fail(err, "Failed to issue key.");
@@ -241,6 +235,7 @@ async function rotateKey(keyId) {
 }
 
 async function revokeKey(keyId) {
+  if (!window.confirm("Revoke this key? This is permanent — a revoked key cannot be reactivated, only deleted.")) return;
   try {
     await $api.post("/plugin/claudera/api/keys/revoke", { key_id: keyId });
     await fetchKeys();
@@ -249,12 +244,13 @@ async function revokeKey(keyId) {
   }
 }
 
-async function activateKey(keyId) {
+async function deleteKey(keyId) {
+  if (!window.confirm("Delete this key permanently? Any Claude client still using it will stop working.")) return;
   try {
-    await $api.post("/plugin/claudera/api/keys/activate", { key_id: keyId });
+    await $api.post("/plugin/claudera/api/keys/delete", { key_id: keyId });
     await fetchKeys();
   } catch (err) {
-    fail(err, "Failed to activate key.");
+    fail(err, "Failed to delete key.");
   }
 }
 
