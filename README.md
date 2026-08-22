@@ -41,12 +41,35 @@ This is the inverse of Caldera's bundled `mcp` plugin, which embeds an LLM insid
 | Read agents | `list_agents` |
 | Creation | `create_ability`, `create_adversary`, `create_operation` |
 | Deletion | `delete_ability`, `delete_adversary`, `delete_operation` |
-| Export | `export_ability`, `export_adversary`, `export_operation` |
+| Export | `export_ability`, `export_adversary`, `export_operation`, `export_adversary_bundle`, `export_abilities_bundle` |
 | Execution control | `start_operation`, `pause_operation`, `resume_operation`, `stop_operation`, `get_operation_status` |
 | Read-back | `get_operation_report`, `query_facts`, `list_abilities`, `list_adversaries`, `list_operations` |
 | Correlation | `get_correlation_keys` |
 | Payloads | `find_payload`, `download_payload` |
 | Run history | `get_run_history` |
+
+### Export format
+
+The default shape for an export is a single downloadable `.zip`, not one concatenated
+YAML and not a loose list of files:
+
+- **Adversary + its abilities** — `export_adversary_bundle` returns a zip with the
+  adversary profile at the archive root and each referenced ability under `abilities/`.
+  Every file is named after the artefact it contains (e.g.
+  `T1688_arm_bcd_safeboot_network_no_reboot.yml`), *not* its UUID, and the archive is
+  named after the adversary. File bodies are byte-for-byte what Caldera stores, so they
+  re-import unchanged. The result also carries `tree` (a short listing to show the user)
+  plus `abilities_included` / `abilities_missing`.
+- **Several abilities on their own** — `export_abilities_bundle` returns a flat zip
+  (no `abilities/` subfolder), each ability named after itself.
+- **A single ability or adversary** — `export_ability` / `export_adversary` return the
+  YAML straight, named after the artefact, for a direct download (no zip).
+- **An operation** — `export_operation` returns the run report as JSON.
+
+Zips are delivered base64-encoded in `content_base64` (`format` = `zip`,
+`encoding` = `base64`). Present the archive and its `tree` in chat; don't paste the YAML
+bodies back. Override this shape only when the user asks for something else (one bundled
+file, an inline paste, etc.).
 
 ## Quick start
 
@@ -160,7 +183,7 @@ Questions and bug reports go to [GitHub Issues](https://github.com/sect0r-cybers
 
 ```
 app/         MCP server, auth, key store, naming, payloads, CLI
-app/tools/   the 20 tool implementations, grouped by concern
+app/tools/   the tool implementations, grouped by concern
 gui/views/   the magma Vue panel (claudera.vue)
 conf/        default configuration
 tests/       stdlib unittest suite

@@ -15,8 +15,12 @@ This file is original to the claudera plugin (Apache-2.0).
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import os
+import re
+import zipfile
 from collections import Counter
 from datetime import datetime
 
@@ -294,6 +298,29 @@ async def _delete_adversary(ctx: ToolContext, args: dict) -> dict:
 
 # -- export -------------------------------------------------------------------
 
+_UNSAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_filename(name: str, fallback: str) -> str:
+    """Filesystem-safe base name derived from an artefact's *name* (not its UUID).
+
+    Path separators and other unsafe characters collapse to ``_``; case and the
+    ATT&CK-style ``T####`` prefix are preserved. Falls back to the UUID when the
+    name is empty or sanitises to nothing (e.g. ``T1688_arm_bcd_safeboot``)."""
+    base = _UNSAFE_FILENAME.sub("_", (name or "").strip()).strip("._")
+    return base or fallback
+
+
+def _unique(base: str, seen: set, suffix: str) -> str:
+    """Disambiguate a colliding base name by appending the artefact's short id."""
+    if base not in seen:
+        seen.add(base)
+        return base
+    disambiguated = f"{base}_{suffix}"
+    seen.add(disambiguated)
+    return disambiguated
+
+
 async def _on_disk_yaml(ctx: ToolContext, obj_id: str, fallback_display: dict) -> str:
     """Return the object's on-disk YAML (byte-for-byte how Caldera stores it),
     falling back to a schema dump for objects that live only in memory."""
@@ -307,18 +334,135 @@ async def _on_disk_yaml(ctx: ToolContext, obj_id: str, fallback_display: dict) -
     return yaml.safe_dump([fallback_display], sort_keys=False, allow_unicode=True)
 
 
+def _zip_bundle(files: list[dict]) -> str:
+    """Pack ``[{path, content}]`` into a zip and return it base64-encoded.
+
+    Contents are written byte-for-byte so the archive re-imports into Caldera
+    unchanged."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for entry in files:
+            archive.writestr(entry["path"], entry["content"])
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _tree(archive_name: str, files: list[dict]) -> str:
+    """A short human-readable tree of the archive's contents for chat."""
+    lines = [f"{archive_name}"]
+    paths = sorted(e["path"] for e in files)
+    for i, path in enumerate(paths):
+        connector = "└──" if i == len(paths) - 1 else "├──"
+        lines.append(f"{connector} {path}")
+    return "\n".join(lines)
+
+
 async def _export_ability(ctx: ToolContext, args: dict) -> dict:
     ab = await _locate_one(ctx, "abilities", dict(ability_id=args["ability_id"]), "ability id")
     content = await _on_disk_yaml(ctx, ab.ability_id, ab.display)
+    filename = f"{_safe_filename(ab.name, ab.ability_id)}.yml"
     return {"status": "exported", "ability_id": ab.ability_id, "name": ab.name,
-            "format": "yaml", "filename": f"{ab.ability_id}.yml", "content": content}
+            "format": "yaml", "filename": filename, "content": content}
 
 
 async def _export_adversary(ctx: ToolContext, args: dict) -> dict:
     adv = await _locate_one(ctx, "adversaries", dict(adversary_id=args["adversary_id"]), "adversary id")
     content = await _on_disk_yaml(ctx, adv.adversary_id, adv.display)
+    filename = f"{_safe_filename(adv.name, adv.adversary_id)}.yml"
     return {"status": "exported", "adversary_id": adv.adversary_id, "name": adv.name,
-            "format": "yaml", "filename": f"{adv.adversary_id}.yml", "content": content}
+            "format": "yaml", "filename": filename, "content": content}
+
+
+async def _export_adversary_bundle(ctx: ToolContext, args: dict) -> dict:
+    """Export an adversary profile *and every ability it references* as one zip.
+
+    Layout: the adversary profile at the archive root, each ability under
+    ``abilities/``, every file named after its artefact (not its UUID), the
+    archive named after the adversary. This is the default shape for exporting an
+    adversary with its abilities."""
+    adv = await _locate_one(ctx, "adversaries", dict(adversary_id=args["adversary_id"]), "adversary id")
+
+    files: list[dict] = []
+    adv_base = _safe_filename(adv.name, adv.adversary_id)
+    adv_yaml = await _on_disk_yaml(ctx, adv.adversary_id, adv.display)
+    files.append({"path": f"{adv_base}.yml", "content": adv_yaml})
+
+    seen: set = set()
+    included, missing = [], []
+    # atomic_ordering is the ordered list of ability ids; dedupe, keep order.
+    ordering = list(dict.fromkeys(adv.atomic_ordering or []))
+    for ability_id in ordering:
+        matches = [a for a in await ctx.services["data_svc"].locate(
+            "abilities", match=dict(ability_id=ability_id)) if _visible(ctx, a)]
+        if not matches:
+            missing.append(ability_id)
+            continue
+        ab = matches[0]
+        base = _unique(_safe_filename(ab.name, ab.ability_id), seen, ab.ability_id[:8])
+        content = await _on_disk_yaml(ctx, ab.ability_id, ab.display)
+        files.append({"path": f"abilities/{base}.yml", "content": content})
+        included.append({"ability_id": ab.ability_id, "name": ab.name, "path": f"abilities/{base}.yml"})
+
+    archive_name = f"{adv_base}.zip"
+    result = {
+        "status": "exported",
+        "adversary_id": adv.adversary_id,
+        "name": adv.name,
+        "format": "zip",
+        "encoding": "base64",
+        "filename": archive_name,
+        "content_base64": _zip_bundle(files),
+        "abilities_included": included,
+        "ability_count": len(included),
+        "tree": _tree(archive_name, files),
+    }
+    if missing:
+        # Deliver what resolves; tell the caller what could not be included.
+        result["abilities_missing"] = missing
+    return result
+
+
+async def _export_abilities_bundle(ctx: ToolContext, args: dict) -> dict:
+    """Export several abilities as a flat zip (no ``abilities/`` subfolder).
+
+    Use this for the 'just abilities' case: each ability named after itself,
+    all at the archive root."""
+    ability_ids = list(dict.fromkeys(args["ability_ids"] or []))
+    if not ability_ids:
+        raise ValueError("ability_ids must contain at least one ability id")
+
+    files: list[dict] = []
+    seen: set = set()
+    included, missing = [], []
+    for ability_id in ability_ids:
+        matches = [a for a in await ctx.services["data_svc"].locate(
+            "abilities", match=dict(ability_id=ability_id)) if _visible(ctx, a)]
+        if not matches:
+            missing.append(ability_id)
+            continue
+        ab = matches[0]
+        base = _unique(_safe_filename(ab.name, ab.ability_id), seen, ab.ability_id[:8])
+        content = await _on_disk_yaml(ctx, ab.ability_id, ab.display)
+        files.append({"path": f"{base}.yml", "content": content})
+        included.append({"ability_id": ab.ability_id, "name": ab.name, "path": f"{base}.yml"})
+
+    if not files:
+        raise ValueError(f"none of the requested abilities are known or accessible: {ability_ids}")
+
+    archive_name = args.get("archive_name") or "abilities"
+    archive_name = f"{_safe_filename(archive_name, 'abilities')}.zip"
+    result = {
+        "status": "exported",
+        "format": "zip",
+        "encoding": "base64",
+        "filename": archive_name,
+        "content_base64": _zip_bundle(files),
+        "abilities_included": included,
+        "ability_count": len(included),
+        "tree": _tree(archive_name, files),
+    }
+    if missing:
+        result["abilities_missing"] = missing
+    return result
 
 
 async def _export_operation(ctx: ToolContext, args: dict) -> dict:
@@ -434,4 +578,29 @@ def register(registry: Registry) -> None:
         input_schema=_op_id_schema({"include_output": {"type": "boolean",
                      "description": "Include command output in the report (default false)."}}),
         handler=_export_operation,
+    ))
+    registry.add(ToolSpec(
+        name="export_adversary_bundle",
+        description=(
+            "Default way to export an adversary together with its abilities. Returns a single zip "
+            "(base64 in 'content_base64', 'format'='zip', 'encoding'='base64') with the adversary "
+            "profile at the archive root and each referenced ability under 'abilities/', every file "
+            "named after its artefact (not its UUID) and the archive named after the adversary. Also "
+            "returns 'tree' (a short listing of the contents), 'abilities_included', and "
+            "'abilities_missing'. Save the zip and show the user the tree; do not paste the YAML bodies."),
+        input_schema={"type": "object", "properties": {"adversary_id": {"type": "string"}},
+                      "required": ["adversary_id"], "additionalProperties": False},
+        handler=_export_adversary_bundle,
+    ))
+    registry.add(ToolSpec(
+        name="export_abilities_bundle",
+        description=(
+            "Export several abilities as one flat zip (no subfolder): each ability named after itself "
+            "at the archive root. Returns base64 in 'content_base64' plus a 'tree'. Use for the "
+            "'just abilities' case; for an adversary and its abilities use export_adversary_bundle."),
+        input_schema={"type": "object", "properties": {
+            "ability_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            "archive_name": {"type": "string", "description": "Optional base name for the .zip (default 'abilities')."}},
+            "required": ["ability_ids"], "additionalProperties": False},
+        handler=_export_abilities_bundle,
     ))
