@@ -154,6 +154,8 @@ Claude Desktop accepts stdio servers only, so bridge the endpoint with `mcp-remo
 
 Set `CALDERA_MCP_KEY` to the token for Claude Code, and `CALDERA_MCP_AUTH` to `Bearer <token>` for the Claude Desktop bridge. Restart the client afterwards so it picks up the variable.
 
+A `401` almost always means the variable was not set and the client sent the reference itself: a key must start `cald_`, so `${CALDERA_MCP_KEY}` arriving verbatim is rejected exactly like a wrong key. On the Desktop bridge the same cause surfaces instead as `Unexpected token '<'` from `mcp-remote`.
+
 ## Configuration
 
 Set in `conf/default.yml`:
