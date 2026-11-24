@@ -5,6 +5,11 @@ wraps it in a ``StreamableHTTPSessionManager`` (single endpoint, POST for
 requests, session tracked via the ``Mcp-Session-Id`` header). The manager is an
 ASGI app; :mod:`asgi_bridge` mounts it onto Caldera's aiohttp router.
 
+Handlers are registered through the SDK's ``on_*`` constructor parameters and
+receive a ``ServerRequestContext`` per call. The transport-level Starlette
+request hangs off ``ctx.request``, which is where the bearer identity is
+resolved from.
+
 This file is original to the claudera plugin (Apache-2.0).
 """
 
@@ -15,7 +20,9 @@ import logging
 
 import mcp.types as types
 from aiohttp import web
-from mcp.server.lowlevel import Server
+from jsonschema import Draft202012Validator
+from mcp import MCPError
+from mcp.server import Server, ServerRequestContext
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -27,6 +34,23 @@ from .tools import ToolContext, build_registry
 log = logging.getLogger("claudera")
 
 MCP_SESSION_HEADER = "mcp-session-id"
+
+# Marks a run-history session_id derived from the bearer key rather than from a
+# transport session. See CalderaMCP._context_for_request.
+RUN_KEY_PREFIX = "key:"
+
+
+def _tool_error(message: str) -> types.CallToolResult:
+    """Return a failure the calling model can see and correct.
+
+    The SDK's ``on_call_tool`` does not wrap handler exceptions: an exception
+    becomes a top-level JSON-RPC error whose text the model never sees, so
+    tool-level failures are returned as ``is_error=True`` results instead.
+    """
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=message)],
+        is_error=True,
+    )
 
 
 class CalderaMCP:
@@ -40,8 +64,18 @@ class CalderaMCP:
         self.plugin_dir = plugin_dir
         self.keystore = KeyStore(db_path) if db_path else None
         self.registry = build_registry(services)
-        self.server: Server = Server("claudera")
-        self._register_handlers()
+        # One compiled validator per tool. check_schema() runs at load time so a
+        # malformed tool schema fails when the plugin starts rather than on the
+        # first call that happens to exercise it.
+        self._validators: dict[str, Draft202012Validator] = {}
+        for spec in self.registry.specs():
+            Draft202012Validator.check_schema(spec.input_schema)
+            self._validators[spec.name] = Draft202012Validator(spec.input_schema)
+        self.server: Server = Server(
+            "claudera",
+            on_list_tools=self._list_tools,
+            on_call_tool=self._call_tool,
+        )
 
         mcp_cfg = self.config.get("mcp") or {}
         sec_cfg = (mcp_cfg.get("security") or {})
@@ -61,54 +95,101 @@ class CalderaMCP:
 
     # -- MCP protocol handlers -------------------------------------------------
 
-    def _register_handlers(self) -> None:
-        @self.server.list_tools()
-        async def _list_tools() -> list[types.Tool]:
-            return [
+    async def _list_tools(self, ctx: ServerRequestContext,
+                          params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
+        return types.ListToolsResult(
+            tools=[
                 types.Tool(
                     name=spec.name,
                     description=spec.description,
-                    inputSchema=spec.input_schema,
+                    input_schema=spec.input_schema,
                 )
                 for spec in self.registry.specs()
             ]
+        )
 
-        @self.server.call_tool()
-        async def _call_tool(name: str, arguments: dict) -> list[types.ContentBlock]:
-            spec = self.registry.get(name)
-            if spec is None:
-                raise ValueError(f"unknown tool: {name}")
-            ctx = self._context_for_request()
-            if self.keystore is not None and ctx.username is None:
-                # Defence in depth: handle_http already gated the request, but a
-                # key could have been revoked mid-session.
-                raise ValueError("unauthorized: no valid Caldera identity for this request")
-            result = await spec.handler(ctx, arguments or {})
-            if spec.mutating and self.keystore is not None:
-                self.keystore.log_event(
-                    session_id=ctx.session_id, username=ctx.username,
-                    tool=name, result=result if isinstance(result, dict) else None,
-                )
-            return [types.TextContent(type="text", text=json.dumps(result, default=str))]
+    async def _call_tool(self, ctx: ServerRequestContext,
+                         params: types.CallToolRequestParams) -> types.CallToolResult:
+        name = params.name
+        arguments = params.arguments or {}
+        spec = self.registry.get(name)
+        if spec is None:
+            return _tool_error(f"unknown tool: {name}")
 
-    def _context_for_request(self) -> ToolContext:
+        tool_ctx = self._context_for_request(ctx)
+        if self.keystore is not None and tool_ctx.username is None:
+            # Defence in depth: handle_http already gated the request, but a
+            # key could have been revoked mid-session. The model cannot correct
+            # an authorisation failure, so reject the request at the protocol
+            # level instead of returning it as a tool result.
+            raise MCPError(
+                types.INVALID_REQUEST,
+                "unauthorized: no valid Caldera identity for this request",
+            )
+
+        invalid = self._validate(name, arguments)
+        if invalid is not None:
+            return _tool_error(invalid)
+
+        try:
+            result = await spec.handler(tool_ctx, arguments)
+        except Exception as exc:  # noqa: BLE001 - surfaced to the model below
+            log.warning("claudera tool %s failed: %s", name, exc)
+            return _tool_error(f"{name} failed: {exc}")
+
+        if spec.mutating and self.keystore is not None:
+            self.keystore.log_event(
+                session_id=tool_ctx.session_id, username=tool_ctx.username,
+                tool=name, result=result if isinstance(result, dict) else None,
+            )
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(result, default=str))],
+            is_error=False,
+        )
+
+    def _validate(self, name: str, arguments: dict) -> str | None:
+        """Check *arguments* against the tool's declared JSON Schema.
+
+        The SDK's low-level ``Server`` does not validate tool input against the
+        declared schema, so claudera does it here: handlers index required keys
+        directly and assume their declared types. Returns an error message, or
+        ``None`` when the arguments are valid.
+        """
+        validator = self._validators.get(name)
+        if validator is None:
+            return None
+        errors = sorted(validator.iter_errors(arguments), key=lambda e: list(e.path))
+        if not errors:
+            return None
+        first = errors[0]
+        path = "/".join(str(part) for part in first.path)
+        where = f" at {path}" if path else ""
+        return f"invalid arguments for {name}{where}: {first.message}"
+
+    def _context_for_request(self, ctx: ServerRequestContext) -> ToolContext:
         """Build the per-call context.
 
-        Resolves the bearer identity from the Starlette request the MCP transport
-        threads into ``request_context`` for the current JSON-RPC message, so the
-        user/group/session are available inside the tool handler.
+        Resolves the bearer identity from the Starlette request the MCP
+        transport threads onto ``ctx``, so the user/group/session are available
+        inside the tool handler. ``ctx.request`` is ``None`` on transports that
+        carry no HTTP request (the in-memory client the offline protocol test
+        uses), in which case the identity stays unresolved.
         """
         username = group = session_id = None
-        if self.keystore is not None:
-            try:
-                req = self.server.request_context.request
-            except LookupError:
-                req = None
-            if req is not None:
-                identity = resolve_identity(self.keystore, req.headers)
-                if identity is not None:
-                    username, group = identity.username, identity.group
-                session_id = req.headers.get(MCP_SESSION_HEADER)
+        request = getattr(ctx, "request", None)
+        if self.keystore is not None and request is not None:
+            identity = resolve_identity(self.keystore, request.headers)
+            if identity is not None:
+                username, group = identity.username, identity.group
+            session_id = request.headers.get(MCP_SESSION_HEADER)
+            if session_id is None and identity is not None:
+                # From the 2026-07-28 revision there is no session handshake, so
+                # no Mcp-Session-Id to group run-history events by: without a
+                # fallback every modern client's events collapse into one
+                # NULL-keyed run. The bearer key is the next most stable handle
+                # on "one client", and is prefixed so an audit reader can tell a
+                # key-grouped run from a real transport session.
+                session_id = f"{RUN_KEY_PREFIX}{identity.key_id}"
         return ToolContext(
             services=self.services,
             username=username,

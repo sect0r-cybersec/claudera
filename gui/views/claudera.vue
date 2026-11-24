@@ -40,7 +40,7 @@
         <h2 class="subtitle is-5 mb-0">Runs</h2>
         <button class="button is-small" @click="refreshHistory" :class="{ 'is-loading': isLoading }">Refresh</button>
       </div>
-      <p class="is-size-7 has-text-grey mb-3">A run is the set of tool calls from one MCP client session, grouped by session id. Click a run to filter the events below to that session.</p>
+      <p class="is-size-7 has-text-grey mb-3">A run is the set of tool calls from one MCP client, grouped by session id. Clients on the 2026-07-28 protocol send no session id, so their runs group by bearer key instead and show as <code>key:…</code>. Click a run to filter the events below to it.</p>
 
       <div class="claudera-pager mb-2">
         <div class="claudera-pager-left">
@@ -388,7 +388,11 @@ function resetPage(name) {
 // -- data loading ----------------------------------------------------------
 
 function shortId(id) {
-  return id ? String(id).slice(0, 8) : "-";
+  if (!id) return "-";
+  const s = String(id);
+  // Runs keyed by bearer key keep their "key:" marker, so the id stays
+  // readable once truncated and is not mistaken for a transport session.
+  return s.startsWith("key:") ? s.slice(0, 12) : s.slice(0, 8);
 }
 
 function fail(err, fallback) {

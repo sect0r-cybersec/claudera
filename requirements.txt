@@ -1,3 +1,14 @@
-# claudera depends only on the official MCP Python SDK on top of Caldera's own
-# runtime (aiohttp, starlette are already present in the Caldera environment).
-mcp>=1.28.0
+# claudera depends on the official MCP Python SDK on top of Caldera's own
+# runtime (aiohttp is already present in the Caldera environment; starlette and
+# sse-starlette arrive with the SDK, not with Caldera).
+#
+# Both pins are capped below the next major: the SDK's 2.0 release removed the
+# lowlevel Server decorator API an uncapped `mcp>=1.28.0` had silently started
+# resolving to.
+mcp>=2.3,<3
+
+# The SDK's lowlevel Server does not validate tool arguments against their
+# declared inputSchema, so claudera validates them itself (see
+# CalderaMCP._validate). jsonschema already arrives as an MCP dependency; it is
+# declared here because claudera imports it directly.
+jsonschema>=4.0,<5
