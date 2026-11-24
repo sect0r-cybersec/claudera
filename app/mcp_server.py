@@ -35,6 +35,10 @@ log = logging.getLogger("claudera")
 
 MCP_SESSION_HEADER = "mcp-session-id"
 
+# Marks a run-history session_id derived from the bearer key rather than from a
+# transport session. See CalderaMCP._context_for_request.
+RUN_KEY_PREFIX = "key:"
+
 
 def _tool_error(message: str) -> types.CallToolResult:
     """Return a failure the calling model can see and correct.
@@ -178,6 +182,14 @@ class CalderaMCP:
             if identity is not None:
                 username, group = identity.username, identity.group
             session_id = request.headers.get(MCP_SESSION_HEADER)
+            if session_id is None and identity is not None:
+                # From the 2026-07-28 revision there is no session handshake, so
+                # no Mcp-Session-Id to group run-history events by: without a
+                # fallback every modern client's events collapse into one
+                # NULL-keyed run. The bearer key is the next most stable handle
+                # on "one client", and is prefixed so an audit reader can tell a
+                # key-grouped run from a real transport session.
+                session_id = f"{RUN_KEY_PREFIX}{identity.key_id}"
         return ToolContext(
             services=self.services,
             username=username,

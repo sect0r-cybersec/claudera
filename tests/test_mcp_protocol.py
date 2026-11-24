@@ -16,11 +16,12 @@ This file is original to the claudera plugin (Apache-2.0).
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 from mcp import MCPError
 from mcp.client import Client
 
-from plugins.claudera.app.mcp_server import CalderaMCP
+from plugins.claudera.app.mcp_server import RUN_KEY_PREFIX, CalderaMCP
 
 
 def _server(db_path=None):
@@ -92,6 +93,58 @@ class TestIdentityGate(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(MCPError) as caught:
                 await client.call_tool("list_agents", {})
         self.assertIn("unauthorized", str(caught.exception))
+
+
+class TestRunGrouping(unittest.TestCase):
+    """How run-history events are grouped when there is no transport session.
+
+    From the 2026-07-28 revision the protocol has no session handshake, so no
+    Mcp-Session-Id reaches the server and run history would otherwise collapse
+    every modern client's events into a single NULL-keyed run.
+    """
+
+    def setUp(self):
+        self.mcp = CalderaMCP(
+            services={}, config={},
+            db_path=os.path.join(tempfile.mkdtemp(), "keys.db"))
+        self.key_id, self.token = self.mcp.keystore.issue("tester", "red")
+
+    def _ctx(self, headers):
+        return SimpleNamespace(request=SimpleNamespace(headers=headers))
+
+    def test_absent_session_header_falls_back_to_the_bearer_key(self):
+        tool_ctx = self.mcp._context_for_request(
+            self._ctx({"Authorization": f"Bearer {self.token}"}))
+        self.assertEqual(tool_ctx.username, "tester")
+        self.assertEqual(tool_ctx.session_id, f"{RUN_KEY_PREFIX}{self.key_id}")
+
+    def test_session_header_is_preferred_when_the_transport_supplies_one(self):
+        tool_ctx = self.mcp._context_for_request(self._ctx({
+            "Authorization": f"Bearer {self.token}",
+            "mcp-session-id": "0123456789abcdef",
+        }))
+        self.assertEqual(tool_ctx.session_id, "0123456789abcdef")
+
+    def test_unauthenticated_request_gets_no_run_key(self):
+        tool_ctx = self.mcp._context_for_request(self._ctx({}))
+        self.assertIsNone(tool_ctx.username)
+        self.assertIsNone(tool_ctx.session_id)
+
+    def test_events_group_into_one_run_per_key(self):
+        store = self.mcp.keystore
+        other_id, _other_token = store.issue("other", "red")
+        mine = f"{RUN_KEY_PREFIX}{self.key_id}"
+        theirs = f"{RUN_KEY_PREFIX}{other_id}"
+        store.log_event(session_id=mine, username="tester",
+                        tool="delete_adversary", result={})
+        store.log_event(session_id=mine, username="tester",
+                        tool="delete_ability", result={})
+        store.log_event(session_id=theirs, username="other",
+                        tool="delete_adversary", result={})
+
+        runs = {run["session_id"]: run["event_count"] for run in store.list_runs()}
+        self.assertEqual(runs[mine], 2)
+        self.assertEqual(runs[theirs], 1)
 
 
 if __name__ == "__main__":
