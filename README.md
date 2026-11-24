@@ -25,7 +25,7 @@ This is the inverse of Caldera's bundled `mcp` plugin, which embeds an LLM insid
 
 ## Features
 
-- **Runs inside Caldera.** The MCP server mounts as a route on Caldera's own aiohttp app: no second web server, no extra port, and only the MCP Python SDK on top of Caldera's runtime.
+- **Runs inside Caldera.** The MCP server mounts as a route on Caldera's own aiohttp app: no second web server, no extra port, and only the MCP Python SDK (plus `jsonschema`) on top of Caldera's runtime.
 - **Authenticated by default.** Every request carries `Authorization: Bearer <key>`. A bad or missing key is rejected with HTTP 401 before any session starts.
 - **Per-user keys, scoped to real groups.** Keys map to a Caldera username and group taken from Caldera's own config, so a key can only act as a real user. Tokens are stored hashed (argon2); the raw token is shown once.
 - **20 structured tools.** Create abilities, adversaries and operations, drive the full operation lifecycle, read results back, and emit SIEM correlation keys. Every tool returns JSON, never free prose.
@@ -79,7 +79,7 @@ Run all three from the Caldera root, with Caldera's virtualenv active.
    ```bash
    git clone https://github.com/sect0r-cybersec/claudera.git plugins/claudera
    ```
-2. Install the dependency. The MCP Python SDK is the only one; aiohttp and starlette already come with Caldera:
+2. Install the dependencies. These are the MCP Python SDK and `jsonschema`; aiohttp already comes with Caldera, and starlette arrives with the SDK:
    ```bash
    pip install -r plugins/claudera/requirements.txt
    ```
